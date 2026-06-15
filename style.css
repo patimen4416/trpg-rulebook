@@ -585,8 +585,23 @@ body {
 .lb-prev { left: 10px; }
 .lb-next { right: 10px; }
 
-.btn-delete {
+.lb-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
   margin-top: 12px;
+}
+.btn-edit {
+  padding: 6px 20px;
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 3px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.btn-edit:hover { background: var(--accent); color: #fff; }
+.btn-delete {
   padding: 6px 16px;
   background: transparent;
   border: 1px solid var(--danger);

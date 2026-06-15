@@ -671,9 +671,6 @@ async function showLightboxItem() {
   const dateStr = s.created_at ? s.created_at.slice(0, 10) : '';
   document.getElementById('lbMeta').textContent = `${s.uploader_name} が ${dateStr} にアップロード`;
 
-  // 自分のアップロードのみ削除ボタン表示
-  const delBtn = document.getElementById('lbDeleteBtn');
-  delBtn.style.display = (s.uploader_id === currentUser?.id) ? 'inline-block' : 'none';
 }
 
 async function deleteScreenshot() {
@@ -694,6 +691,122 @@ async function deleteScreenshot() {
   render();
 }
 
+// ===== 編集モーダル =====
+let editTags = [];
+
+function openEditModal() {
+  const s = filteredList[currentLbIndex];
+  if (!s) return;
+
+  closeLightbox();
+  document.getElementById('editModal').classList.add('visible');
+
+  // システム選択肢
+  const sel = document.getElementById('editSystem');
+  sel.innerHTML = systems.map(sys =>
+    `<option value="${sys.name}" ${sys.name === s.system_name ? 'selected' : ''}>${sys.name}</option>`
+  ).join('');
+
+  // ページ番号
+  document.getElementById('editPage').value = s.page_number || '';
+
+  // タグ
+  editTags = [...(s.tags || [])];
+  renderEditTags();
+
+  // クイックタグ
+  renderEditQuickTags();
+  sel.onchange = renderEditQuickTags;
+
+  // メモ
+  document.getElementById('editMemo').value = s.title || s.memo || '';
+  document.getElementById('editStatus').textContent = '';
+}
+
+function closeEditModal() {
+  document.getElementById('editModal').classList.remove('visible');
+}
+
+function addEditTag(name) {
+  name = name.trim();
+  if (!name || editTags.includes(name)) return;
+  editTags.push(name);
+  renderEditTags();
+}
+
+function removeEditTag(i) {
+  editTags.splice(i, 1);
+  renderEditTags();
+}
+
+function renderEditTags() {
+  const wrap = document.getElementById('editTagInputWrap');
+  const input = document.getElementById('editTagInput');
+  wrap.querySelectorAll('.added-tag').forEach(el => el.remove());
+  editTags.forEach((t, i) => {
+    const span = document.createElement('span');
+    span.className = 'added-tag';
+    span.innerHTML = `${t} <span class="remove-tag" onclick="removeEditTag(${i})">&times;</span>`;
+    wrap.insertBefore(span, input);
+  });
+}
+
+function renderEditQuickTags() {
+  const selectedSystem = document.getElementById('editSystem').value;
+  const el = document.getElementById('editQuickTags');
+  const tags = tagMaster.filter(t =>
+    t.system_name === selectedSystem || t.system_name === null
+  );
+  el.innerHTML = tags.map(t =>
+    `<span class="quick-tag" onclick="addEditTag('${t.name.replace(/'/g, "\\'")}')">${t.name}</span>`
+  ).join('');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('editTagInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addEditTag(e.target.value);
+      e.target.value = '';
+    }
+  });
+});
+
+async function submitEdit() {
+  const s = filteredList[currentLbIndex];
+  if (!s) return;
+
+  const status = document.getElementById('editStatus');
+  status.textContent = '保存中...';
+
+  const systemName = document.getElementById('editSystem').value;
+  const page = document.getElementById('editPage').value.trim() || null;
+  const memo = document.getElementById('editMemo').value.trim();
+
+  const { error } = await sb
+    .from('rulebook_screenshots')
+    .update({
+      system_name: systemName,
+      page_number: page,
+      tags: editTags,
+      title: memo,
+      memo: memo,
+    })
+    .eq('id', s.id);
+
+  if (error) {
+    status.textContent = 'エラー: ' + error.message;
+    return;
+  }
+
+  status.textContent = '保存しました';
+  await loadScreenshots();
+  setTimeout(() => {
+    closeEditModal();
+    render();
+  }, 500);
+}
+
 // ===== サイドバートグル（モバイル） =====
 function toggleSidebar() {
   document.getElementById('sidebar').classList.toggle('open');
@@ -709,6 +822,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     closeLightbox();
     closeUpload();
+    closeEditModal();
   }
   if (document.getElementById('lightbox').classList.contains('visible')) {
     if (e.key === 'ArrowLeft') navLightbox(-1);

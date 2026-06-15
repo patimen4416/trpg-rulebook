@@ -156,10 +156,52 @@
     <h3 id="lbTitle"></h3>
     <div class="lb-tags" id="lbTags"></div>
     <p class="lb-meta" id="lbMeta"></p>
-    <button class="btn-delete" id="lbDeleteBtn" onclick="deleteScreenshot()" style="display:none;">この画像を削除</button>
+    <div class="lb-actions" id="lbActions">
+      <button class="btn-edit" onclick="openEditModal()">編集</button>
+      <button class="btn-delete" onclick="deleteScreenshot()">削除</button>
+    </div>
   </div>
 </div>
 
-<script src="app.js?v=6"></script>
+<!-- ===== 編集モーダル ===== -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>スクリーンショットを編集</h2>
+      <button class="modal-close" onclick="closeEditModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>ルールブック（システム）</label>
+        <select id="editSystem"></select>
+      </div>
+      <div class="form-group">
+        <label>ページ番号</label>
+        <input type="text" id="editPage" placeholder="例: 142">
+      </div>
+      <div class="form-group">
+        <label>タグ</label>
+        <div class="hint">Enterキーで追加。下のボタンからも追加できます</div>
+        <div class="tag-input-wrap" id="editTagInputWrap" onclick="document.getElementById('editTagInput').focus()">
+          <input type="text" id="editTagInput" placeholder="タグを入力してEnter...">
+        </div>
+        <div class="quick-tags" id="editQuickTags"></div>
+      </div>
+      <div class="form-group">
+        <label>タイトル / メモ</label>
+        <input type="text" id="editMemo" placeholder="例: エンジェルハイロゥのコンボ参考用">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <span class="upload-status" id="editStatus"></span>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-cancel" onclick="closeEditModal()">キャンセル</button>
+        <button class="btn-submit" onclick="submitEdit()">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="app.js?v=7"></script>
 </body>
 </html>
