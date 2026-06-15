@@ -412,7 +412,7 @@ function renderSystemSelect() {
 }
 
 async function addNewSystem(name) {
-  const { data, error } = await supabase
+  const { data, error } = await sb
     .from('rulebook_systems')
     .insert({ name, short_name: name.slice(0, 3), color: '#888' })
     .select()
@@ -569,6 +569,7 @@ async function submitUpload() {
 
       if (storageError) {
         console.error('Storage upload error:', storageError);
+        status.textContent = 'Storage エラー: ' + storageError.message;
         continue;
       }
 
@@ -587,6 +588,7 @@ async function submitUpload() {
 
       if (dbError) {
         console.error('DB insert error:', dbError);
+        status.textContent = 'DB エラー: ' + dbError.message;
         continue;
       }
 
@@ -596,6 +598,11 @@ async function submitUpload() {
     }
   }
 
+  if (successCount === 0) {
+    status.textContent = `アップロード失敗: ファイル${uploadFiles.length}個を処理しましたが保存できませんでした`;
+    btn.disabled = false;
+    return;
+  }
   status.textContent = `${successCount}枚をアップロードしました`;
 
   // データ保存・再読み込み
