@@ -216,7 +216,15 @@ function getSignedUrl(imagePath) {
 const imageUrlCache = {};
 async function resolveImageUrl(imagePath) {
   if (imageUrlCache[imagePath]) return imageUrlCache[imagePath];
-  // まずpublic URLを試す
+  // signed URL を使う（バケットが非公開のため）
+  const { data, error } = await sb.storage
+    .from(STORAGE_BUCKET)
+    .createSignedUrl(imagePath, 3600);
+  if (!error && data?.signedUrl) {
+    imageUrlCache[imagePath] = data.signedUrl;
+    return data.signedUrl;
+  }
+  // フォールバック: public URL
   const pubUrl = getImageUrl(imagePath);
   imageUrlCache[imagePath] = pubUrl;
   return pubUrl;
