@@ -561,7 +561,8 @@ async function submitUpload() {
 
       // 1. Storage にアップロード
       const ext = f.file.name.split('.').pop() || 'jpg';
-      const filePath = `${systemName}/${Date.now()}_${i}.${ext}`;
+      const safeFolder = encodeURIComponent(systemName).replace(/%/g, '_');
+      const filePath = `${safeFolder}/${Date.now()}_${i}.${ext}`;
 
       const { error: storageError } = await sb.storage
         .from(STORAGE_BUCKET)
