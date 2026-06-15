@@ -48,10 +48,17 @@
       <button class="btn-logout" onclick="doLogout()">ログアウト</button>
     </div>
   </div>
+  <!-- モバイル用フローティングボタン -->
+  <button class="fab-upload" onclick="openUpload()">+</button>
 
   <div class="layout">
     <!-- サイドバー -->
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
     <div class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-header-title">フィルタ</span>
+        <button class="sidebar-close" onclick="closeSidebar()">&times;</button>
+      </div>
       <input type="text" class="search-box" id="searchBox" placeholder="タグ・ページ番号で検索...">
 
       <div class="tag-section">
@@ -202,6 +209,6 @@
   </div>
 </div>
 
-<script src="app.js?v=7"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

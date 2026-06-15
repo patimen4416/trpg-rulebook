@@ -280,6 +280,8 @@ function renderSidebar() {
 function toggleFilter(tag) {
   activeFilters.has(tag) ? activeFilters.delete(tag) : activeFilters.add(tag);
   render();
+  // モバイルではタグ選択後にサイドバーを閉じる
+  if (window.innerWidth <= 768) closeSidebar();
 }
 
 function clearFilters() {
@@ -809,7 +811,15 @@ async function submitEdit() {
 
 // ===== サイドバートグル（モバイル） =====
 function toggleSidebar() {
-  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebar').classList.add('open');
+  document.getElementById('sidebarOverlay').classList.add('visible');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebarOverlay').classList.remove('visible');
+  document.body.style.overflow = '';
 }
 
 // ===== 検索 =====
