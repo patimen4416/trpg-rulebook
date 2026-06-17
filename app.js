@@ -521,7 +521,9 @@ function closeUpload() {
 
 function renderSystemSelect(elId) {
   const sel = document.getElementById(elId);
-  sel.innerHTML = systems.map(s => `<option value="${s.name}">${s.name}</option>`).join('')
+  // ダブルクロス3rdを先頭にソート
+  const sorted = [...systems].sort((a, b) => a.name === 'ダブルクロス3rd' ? -1 : b.name === 'ダブルクロス3rd' ? 1 : 0);
+  sel.innerHTML = sorted.map(s => `<option value="${s.name}">${s.name}</option>`).join('')
     + '<option value="__new">+ 新しいシステムを追加...</option>';
   sel.onchange = () => {
     if (sel.value === '__new') {
