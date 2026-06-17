@@ -377,7 +377,7 @@ function renderTextCard(s, idx) {
   // Merge with stored structured_fields (structured_fields takes priority)
   const merged = { ...parsed, ...fields };
 
-  const effectName = merged['エフェクト名'] || s.title || s.memo || '(無題)';
+  const effectName = s.title || s.memo || merged['エフェクト名'] || '(無題)';
   const syndrome = merged['シンドローム'] || '';
 
   // DX3 effect layout fields
