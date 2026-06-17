@@ -732,7 +732,7 @@ let clipState = { img: null, startX: 0, startY: 0, endX: 0, endY: 0, dragging: f
 function openClipper() {
   if (uploadFiles.length === 0) { alert('先に画像を選択してください'); return; }
   const modal = document.getElementById('clipperModal');
-  modal.classList.add('active');
+  modal.classList.add('visible');
   clipState.results = [];
   renderClipResults();
 
@@ -755,7 +755,7 @@ function openClipper() {
 }
 
 function closeClipper() {
-  document.getElementById('clipperModal').classList.remove('active');
+  document.getElementById('clipperModal').classList.remove('visible');
 }
 
 function setupClipperEvents(canvas) {
