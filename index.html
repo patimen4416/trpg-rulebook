@@ -15,7 +15,6 @@
   <div class="login-box">
     <h1>ルルブアーカイブ</h1>
     <p class="login-sub">TRPG ルールブック共有システム</p>
-
     <div id="loginForm">
       <div class="form-group">
         <label>ユーザーID</label>
@@ -48,7 +47,8 @@
       <button class="btn-logout" onclick="doLogout()">ログアウト</button>
     </div>
   </div>
-  <!-- モバイル用フローティングボタン -->
+
+  <!-- モバイルFAB -->
   <button class="fab-upload" onclick="openUpload()">+</button>
 
   <div class="layout">
@@ -59,11 +59,16 @@
         <span class="sidebar-header-title">フィルタ</span>
         <button class="sidebar-close" onclick="closeSidebar()">&times;</button>
       </div>
-      <input type="text" class="search-box" id="searchBox" placeholder="タグ・ページ番号で検索...">
+      <input type="text" class="search-box" id="searchBox" placeholder="タグ・テキストで検索...">
 
       <div class="tag-section">
-        <div class="tag-section-title">システム（ルールブック）</div>
+        <div class="tag-section-title">システム</div>
         <div class="tag-list" id="systemTags"></div>
+      </div>
+
+      <div class="tag-section">
+        <div class="tag-section-title">カテゴリ</div>
+        <div class="tag-list" id="categoryTags"></div>
       </div>
 
       <div class="tag-section">
@@ -74,6 +79,11 @@
       <div class="tag-section">
         <div class="tag-section-title">内容タグ</div>
         <div class="tag-list" id="contentTags"></div>
+      </div>
+
+      <div class="tag-section">
+        <div class="tag-section-title">フィールド値</div>
+        <div class="tag-list" id="fieldTags"></div>
       </div>
 
       <div class="tag-section">
@@ -92,8 +102,12 @@
     <div class="main">
       <div class="toolbar">
         <span class="result-count" id="resultCount"></span>
+        <div class="view-toggle">
+          <button class="view-btn active" data-mode="grid" onclick="setViewMode('grid')">グリッド</button>
+          <button class="view-btn" data-mode="list" onclick="setViewMode('list')">リスト</button>
+        </div>
         <button class="sidebar-toggle" onclick="toggleSidebar()">フィルタ</button>
-        <button class="upload-btn" onclick="openUpload()">+ スクショをアップロード</button>
+        <button class="upload-btn" onclick="openUpload()">+ アップロード</button>
       </div>
       <div id="loadingIndicator" class="loading" style="display:none;">読み込み中...</div>
       <div class="grid" id="cardGrid"></div>
@@ -109,6 +123,7 @@
       <button class="modal-close" onclick="closeUpload()">&times;</button>
     </div>
     <div class="modal-body">
+      <!-- ドロップゾーン -->
       <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
         <p style="font-size:32px; margin-bottom:8px;">+</p>
         <p>ここに画像をドラッグ＆ドロップ</p>
@@ -118,17 +133,36 @@
       <input type="file" id="fileInput" accept="image/*" multiple style="display:none" onchange="handleFiles(this.files)">
       <div class="upload-preview" id="uploadPreview"></div>
 
+      <!-- OCR -->
+      <div class="ocr-section">
+        <button class="btn-ocr" onclick="runOCR()">画像からテキスト認識（OCR）</button>
+        <span class="ocr-status" id="ocrStatus"></span>
+        <textarea id="ocrResult" class="ocr-textarea" rows="4" placeholder="認識結果がここに表示されます。手動で修正できます。"></textarea>
+      </div>
+
+      <!-- システム選択 -->
       <div class="form-group">
         <label>ルールブック（システム）</label>
         <select id="uploadSystem"></select>
       </div>
 
+      <!-- カテゴリ選択 -->
+      <div class="form-group">
+        <label>カテゴリ</label>
+        <select id="uploadCategory"></select>
+      </div>
+
+      <!-- カテゴリ別フィールド -->
+      <div id="uploadFields" class="structured-fields-container" style="display:none;"></div>
+
+      <!-- ページ番号 -->
       <div class="form-group">
         <label>ページ番号</label>
         <div class="hint">半角数字を入力（例: 142）。範囲は「142-145」のように</div>
         <input type="text" id="uploadPage" placeholder="例: 142">
       </div>
 
+      <!-- タグ -->
       <div class="form-group">
         <label>タグ</label>
         <div class="hint">Enterキーで追加。下のボタンからも追加できます</div>
@@ -138,6 +172,7 @@
         <div class="quick-tags" id="quickTags"></div>
       </div>
 
+      <!-- メモ -->
       <div class="form-group">
         <label>タイトル / メモ（任意）</label>
         <input type="text" id="uploadMemo" placeholder="例: エンジェルハイロゥのコンボ参考用">
@@ -158,14 +193,18 @@
   <button class="lb-close" onclick="closeLightbox()">&times;</button>
   <button class="lb-nav lb-prev" onclick="navLightbox(-1)">&lsaquo;</button>
   <button class="lb-nav lb-next" onclick="navLightbox(1)">&rsaquo;</button>
-  <div class="lb-img-wrap" id="lbImgWrap"></div>
-  <div class="lb-info">
-    <h3 id="lbTitle"></h3>
-    <div class="lb-tags" id="lbTags"></div>
-    <p class="lb-meta" id="lbMeta"></p>
-    <div class="lb-actions" id="lbActions">
-      <button class="btn-edit" onclick="openEditModal()">編集</button>
-      <button class="btn-delete" onclick="deleteScreenshot()">削除</button>
+  <div class="lb-content">
+    <div class="lb-img-wrap" id="lbImgWrap"></div>
+    <div class="lb-info">
+      <h3 id="lbTitle"></h3>
+      <div class="lb-tags" id="lbTags"></div>
+      <div id="lbFields" style="display:none;"></div>
+      <div id="lbExtractedText" style="display:none;"></div>
+      <p class="lb-meta" id="lbMeta"></p>
+      <div class="lb-actions">
+        <button class="btn-edit" onclick="openEditModal()">編集</button>
+        <button class="btn-delete" onclick="deleteScreenshot()">削除</button>
+      </div>
     </div>
   </div>
 </div>
@@ -183,12 +222,17 @@
         <select id="editSystem"></select>
       </div>
       <div class="form-group">
+        <label>カテゴリ</label>
+        <select id="editCategory"></select>
+      </div>
+      <div id="editFields" class="structured-fields-container" style="display:none;"></div>
+      <div class="form-group">
         <label>ページ番号</label>
         <input type="text" id="editPage" placeholder="例: 142">
       </div>
       <div class="form-group">
         <label>タグ</label>
-        <div class="hint">Enterキーで追加。下のボタンからも追加できます</div>
+        <div class="hint">Enterキーで追加</div>
         <div class="tag-input-wrap" id="editTagInputWrap" onclick="document.getElementById('editTagInput').focus()">
           <input type="text" id="editTagInput" placeholder="タグを入力してEnter...">
         </div>
@@ -197,6 +241,10 @@
       <div class="form-group">
         <label>タイトル / メモ</label>
         <input type="text" id="editMemo" placeholder="例: エンジェルハイロゥのコンボ参考用">
+      </div>
+      <div class="form-group">
+        <label>抽出テキスト</label>
+        <textarea id="editExtractedText" class="ocr-textarea" rows="4" placeholder="OCRテキストまたは手入力"></textarea>
       </div>
     </div>
     <div class="modal-footer">
@@ -209,6 +257,6 @@
   </div>
 </div>
 
-<script src="app.js?v=8"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>
