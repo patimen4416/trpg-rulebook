@@ -666,14 +666,21 @@ async function runOCR() {
   if (uploadFiles.length === 0) { alert('先に画像を選択してください'); return; }
   if (!window.VISION_API_KEY) { alert('Vision APIキーが設定されていません（config.js）'); return; }
 
+  const statusEl = document.getElementById('ocrStatus');
+  const resultEl = document.getElementById('ocrResult');
+
+  // 安全チェック: APIコール前にSupabaseから最新使用量を再取得
+  statusEl.textContent = '使用量を確認中...';
+  await loadOcrUsage();
+  const safetyMargin = 50; // 安全マージン: 上限の50回手前で停止
+  const hardLimit = ocrUsage.limit - safetyMargin;
   const remaining = ocrUsage.limit - ocrUsage.used;
-  if (remaining <= 0) {
-    alert(`今月のOCR無料枠（${ocrUsage.limit}回）を使い切りました。リセットまで${ocrUsage.resetDate}日です。`);
+  if (ocrUsage.used >= hardLimit) {
+    alert(`今月のOCR使用量が安全上限に達しました（${ocrUsage.used}/${ocrUsage.limit}回、残り${remaining}回）。\n無料枠超過防止のため${safetyMargin}回の安全マージンを設けています。\nリセットまで${ocrUsage.resetDate}日です。`);
+    statusEl.textContent = '';
     return;
   }
 
-  const statusEl = document.getElementById('ocrStatus');
-  const resultEl = document.getElementById('ocrResult');
   statusEl.textContent = 'Google Cloud Vision APIに送信中...';
 
   try {
