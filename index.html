@@ -133,12 +133,16 @@
       <input type="file" id="fileInput" accept="image/*" multiple style="display:none" onchange="handleFiles(this.files)">
       <div class="upload-preview" id="uploadPreview"></div>
 
-      <!-- OCR -->
+      <!-- クリッピング＆OCR -->
       <div class="ocr-section">
-        <button class="btn-ocr" onclick="runOCR()">画像からテキスト認識（Google Vision AI）</button>
+        <div class="ocr-btn-row">
+          <button class="btn-ocr" onclick="runOCR()">全体をOCR</button>
+          <button class="btn-ocr btn-clip" onclick="openClipper()">範囲を選択してOCR</button>
+        </div>
         <span class="ocr-status" id="ocrStatus"></span>
         <div class="ocr-usage-info" id="ocrUsageInfo" style="display:none;"></div>
         <textarea id="ocrResult" class="ocr-textarea" rows="4" placeholder="認識結果がここに表示されます。手動で修正できます。"></textarea>
+        <button class="btn-parse" id="btnParse" onclick="parseOcrToFields()" style="display:none;">OCR結果をフィールドに自動入力</button>
       </div>
 
       <!-- システム選択 -->
@@ -258,6 +262,32 @@
   </div>
 </div>
 
-<script src="app.js?v=10"></script>
+<!-- ===== クリッパーモーダル ===== -->
+<div class="modal-overlay" id="clipperModal">
+  <div class="modal clipper-modal">
+    <div class="modal-header">
+      <h2>範囲を選択してOCR</h2>
+      <button class="modal-close" onclick="closeClipper()">&times;</button>
+    </div>
+    <div class="modal-body clipper-body">
+      <p class="clipper-hint">ドラッグで範囲を選択 → 「選択範囲をOCR」で認識</p>
+      <div class="clipper-canvas-wrap" id="clipperCanvasWrap">
+        <canvas id="clipperCanvas"></canvas>
+      </div>
+      <div class="clipper-actions">
+        <button class="btn-ocr" id="clipOcrBtn" onclick="runClipOCR()" disabled>選択範囲をOCR</button>
+        <button class="btn-cancel" onclick="resetClipSelection()">選択リセット</button>
+        <span class="ocr-status" id="clipOcrStatus"></span>
+      </div>
+      <div class="clip-results" id="clipResults"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeClipper()">閉じる</button>
+      <button class="btn-submit" onclick="applyClipResults()">結果を反映</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js?v=11"></script>
 </body>
 </html>
