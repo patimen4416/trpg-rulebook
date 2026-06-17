@@ -133,7 +133,7 @@ async function showMainApp() {
   document.getElementById('currentUser').textContent = getDisplayName();
   document.getElementById('loadingIndicator').style.display = 'block';
 
-  await Promise.all([loadSystems(), loadTagMaster(), loadCategorySchemas(), loadScreenshots()]);
+  await Promise.all([loadSystems(), loadTagMaster(), loadCategorySchemas(), loadScreenshots(), loadOcrUsage()]);
 
   document.getElementById('loadingIndicator').style.display = 'none';
   render();
@@ -615,42 +615,105 @@ function updateSubmitBtn() {
   document.getElementById('submitBtn').disabled = uploadFiles.length === 0;
 }
 
-// ===== OCR =====
-let tesseractLoaded = false;
-let tesseractWorker = null;
+// ===== OCR (Google Cloud Vision API) =====
+let ocrUsage = { used: 0, limit: 1000, resetDate: '' };
+
+async function loadOcrUsage() {
+  try {
+    const ym = new Date().toISOString().slice(0, 7);
+    const { data, error } = await sb.from('ocr_usage').select('*').eq('year_month', ym).single();
+    if (data) {
+      ocrUsage.used = data.used_count;
+      ocrUsage.limit = data.free_limit;
+    }
+    // リセット日 = 来月1日
+    const now = new Date();
+    const resetD = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const diffDays = Math.ceil((resetD - now) / (1000 * 60 * 60 * 24));
+    ocrUsage.resetDate = diffDays;
+    updateOcrUsageUI();
+  } catch (e) { console.warn('OCR usage load error:', e); }
+}
+
+function updateOcrUsageUI() {
+  const el = document.getElementById('ocrUsageInfo');
+  if (!el) return;
+  const remaining = Math.max(0, ocrUsage.limit - ocrUsage.used);
+  const pct = Math.round((ocrUsage.used / ocrUsage.limit) * 100);
+  const barColor = pct > 80 ? '#e94560' : pct > 50 ? '#ffa502' : '#2ed573';
+  el.innerHTML = `
+    <div class="ocr-usage-bar">
+      <div class="ocr-usage-fill" style="width:${pct}%;background:${barColor}"></div>
+    </div>
+    <span class="ocr-usage-text">今月: ${ocrUsage.used}/${ocrUsage.limit}回使用（残り${remaining}回）リセットまで${ocrUsage.resetDate}日</span>
+  `;
+  el.style.display = 'block';
+}
+
+async function incrementOcrUsage() {
+  const ym = new Date().toISOString().slice(0, 7);
+  const { data } = await sb.from('ocr_usage').select('*').eq('year_month', ym).single();
+  if (data) {
+    await sb.from('ocr_usage').update({ used_count: data.used_count + 1, updated_at: new Date().toISOString() }).eq('year_month', ym);
+  } else {
+    await sb.from('ocr_usage').insert({ year_month: ym, used_count: 1, free_limit: 1000 });
+  }
+  ocrUsage.used++;
+  updateOcrUsageUI();
+}
 
 async function runOCR() {
   if (uploadFiles.length === 0) { alert('先に画像を選択してください'); return; }
+  if (!window.VISION_API_KEY) { alert('Vision APIキーが設定されていません（config.js）'); return; }
+
+  const remaining = ocrUsage.limit - ocrUsage.used;
+  if (remaining <= 0) {
+    alert(`今月のOCR無料枠（${ocrUsage.limit}回）を使い切りました。リセットまで${ocrUsage.resetDate}日です。`);
+    return;
+  }
 
   const statusEl = document.getElementById('ocrStatus');
   const resultEl = document.getElementById('ocrResult');
-  statusEl.textContent = 'OCRエンジンを読み込み中...';
+  statusEl.textContent = 'Google Cloud Vision APIに送信中...';
 
   try {
-    if (!tesseractLoaded) {
-      // Tesseract.js v5 CDN
-      if (!window.Tesseract) {
-        await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
-      }
-      tesseractLoaded = true;
-    }
+    // 画像をbase64に変換（data:prefix除去）
+    const dataUrl = uploadFiles[0].dataUrl;
+    const base64 = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
 
-    statusEl.textContent = 'テキスト認識中...（日本語モデル初回は少し時間がかかります）';
+    const requestBody = {
+      requests: [{
+        image: { content: base64 },
+        features: [{ type: 'DOCUMENT_TEXT_DETECTION', maxResults: 1 }],
+        imageContext: { languageHints: ['ja', 'en'] }
+      }]
+    };
 
-    const { data: { text } } = await Tesseract.recognize(
-      uploadFiles[0].dataUrl,
-      'jpn',
-      { logger: m => {
-        if (m.status === 'recognizing text') {
-          statusEl.textContent = `認識中... ${Math.round((m.progress || 0) * 100)}%`;
-        }
-      }}
+    const resp = await fetch(
+      `https://vision.googleapis.com/v1/images:annotate?key=${VISION_API_KEY}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) }
     );
 
-    resultEl.value = text.trim();
-    statusEl.textContent = '認識完了 - 内容を確認・修正してください';
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => ({}));
+      throw new Error(`API Error ${resp.status}: ${errData.error?.message || resp.statusText}`);
+    }
+
+    const result = await resp.json();
+    const annotation = result.responses?.[0]?.fullTextAnnotation;
+
+    if (annotation && annotation.text) {
+      resultEl.value = annotation.text.trim();
+      statusEl.textContent = `認識完了（${annotation.text.length}文字） - 内容を確認・修正してください`;
+    } else {
+      resultEl.value = '';
+      statusEl.textContent = 'テキストが検出されませんでした';
+    }
+
+    // 使用量カウントアップ
+    await incrementOcrUsage();
   } catch (e) {
-    console.error('OCR error:', e);
+    console.error('Vision API error:', e);
     statusEl.textContent = 'OCRエラー: ' + e.message;
   }
 }
