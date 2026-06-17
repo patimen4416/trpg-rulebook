@@ -135,8 +135,9 @@
 
       <!-- OCR -->
       <div class="ocr-section">
-        <button class="btn-ocr" onclick="runOCR()">画像からテキスト認識（OCR）</button>
+        <button class="btn-ocr" onclick="runOCR()">画像からテキスト認識（Google Vision AI）</button>
         <span class="ocr-status" id="ocrStatus"></span>
+        <div class="ocr-usage-info" id="ocrUsageInfo" style="display:none;"></div>
         <textarea id="ocrResult" class="ocr-textarea" rows="4" placeholder="認識結果がここに表示されます。手動で修正できます。"></textarea>
       </div>
 
