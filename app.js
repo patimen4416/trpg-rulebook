@@ -664,7 +664,7 @@ async function incrementOcrUsage() {
 
 async function runOCR() {
   if (uploadFiles.length === 0) { alert('先に画像を選択してください'); return; }
-  if (!window.VISION_API_KEY) { alert('Vision APIキーが設定されていません（config.js）'); return; }
+  if (typeof VISION_API_KEY === 'undefined' || !VISION_API_KEY) { alert('Vision APIキーが設定されていません（config.js）'); return; }
 
   const statusEl = document.getElementById('ocrStatus');
   const resultEl = document.getElementById('ocrResult');
