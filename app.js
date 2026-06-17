@@ -30,7 +30,7 @@ const defaultCategorySchemas = [
     system_name: 'ダブルクロス3rd', category: 'エフェクト', sort_order: 1,
     fields: [
       { name: '記載本', type: 'text', placeholder: '基本ルールブック1' },
-      { name: 'シンドローム', type: 'select', options: ['エンジェルハイロゥ','バロール','ブラックドッグ','ブラムストーカー','キメラ','エグザイル','ハヌマーン','モルフェウス','ノイマン','オルクス','サラマンドラ','ソラリス'] },
+      { name: 'シンドローム', type: 'select', options: ['エンジェルハイロゥ','バロール','ブラックドッグ','ブラムストーカー','キメラ','エグザイル','ハヌマーン','ミストルティン','モルフェウス','ノイマン','オルクス','サラマンドラ','ソラリス','ウロボロス'] },
       { name: 'タイミング', type: 'select', options: ['メジャー','マイナー','セットアップ','イニシアチブ','クリンナップ','リアクション','オート','常時'] },
       { name: '技能', type: 'text', placeholder: '白兵, 射撃, RC 等' },
       { name: '対象', type: 'text', placeholder: '単体, 範囲(選択) 等' },
@@ -42,7 +42,7 @@ const defaultCategorySchemas = [
     system_name: 'ダブルクロス3rd', category: 'Dロイス', sort_order: 2,
     fields: [
       { name: '記載本', type: 'text', placeholder: '基本ルールブック1' },
-      { name: 'シンドローム', type: 'select', options: ['エンジェルハイロゥ','バロール','ブラックドッグ','ブラムストーカー','キメラ','エグザイル','ハヌマーン','モルフェウス','ノイマン','オルクス','サラマンドラ','ソラリス','共通'] },
+      { name: 'シンドローム', type: 'select', options: ['エンジェルハイロゥ','バロール','ブラックドッグ','ブラムストーカー','キメラ','エグザイル','ハヌマーン','ミストルティン','モルフェウス','ノイマン','オルクス','サラマンドラ','ソラリス','ウロボロス','共通'] },
       { name: '制限', type: 'text', placeholder: '取得条件等' },
     ]
   },
@@ -50,7 +50,7 @@ const defaultCategorySchemas = [
     system_name: 'ダブルクロス3rd', category: 'アイテム', sort_order: 3,
     fields: [
       { name: '記載本', type: 'text', placeholder: '基本ルールブック1' },
-      { name: 'シンドローム', type: 'select', options: ['エンジェルハイロゥ','バロール','ブラックドッグ','ブラムストーカー','キメラ','エグザイル','ハヌマーン','モルフェウス','ノイマン','オルクス','サラマンドラ','ソラリス','共通'] },
+      { name: 'シンドローム', type: 'select', options: ['エンジェルハイロゥ','バロール','ブラックドッグ','ブラムストーカー','キメラ','エグザイル','ハヌマーン','ミストルティン','モルフェウス','ノイマン','オルクス','サラマンドラ','ソラリス','ウロボロス','共通'] },
       { name: '種類', type: 'select', options: ['武器','防具','その他','ヴィークル','コネ'] },
     ]
   },
@@ -957,10 +957,12 @@ function parseEffectText(text) {
     parsed['エフェクト名'] = firstLine;
   }
 
-  // Try to detect シンドローム from known names
-  const syndromes = ['エンジェルハイロゥ','バロール','ブラックドッグ','ブラムストーカー','キメラ','エグザイル','ハヌマーン','モルフェウス','ノイマン','オルクス','サラマンドラ','ソラリス'];
+  // Try to detect シンドローム from known names (longer names first to avoid partial match)
+  const syndromes = ['エンジェルハイロゥ','ブラムストーカー','ブラックドッグ','サラマンドラ','ミストルティン','モルフェウス','ハヌマーン','ウロボロス','エグザイル','ノイマン','ソラリス','バロール','オルクス','キメラ'];
   for (const syn of syndromes) {
-    if (allText.includes(syn)) {
+    // Match as standalone word: preceded/followed by whitespace, punctuation, or line boundary
+    const re = new RegExp('(?:^|[\\s/／・、,\\(（])' + syn + '(?:$|[\\s/／・、,\\)）])', 'm');
+    if (re.test(allText)) {
       parsed['シンドローム'] = parsed['シンドローム'] ? parsed['シンドローム'] + '/' + syn : syn;
     }
   }
