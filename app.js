@@ -913,8 +913,9 @@ async function runClipOCR() {
       return;
     }
 
-    // Save result with crop coordinates
-    clipState.results.push({ x: sx, y: sy, w: sw, h: sh, text, parsed: parseEffectText(text) });
+    // Save result with crop coordinates and cropped image
+    const croppedDataUrl = cropCanvas.toDataURL('image/png');
+    clipState.results.push({ x: sx, y: sy, w: sw, h: sh, text, parsed: parseEffectText(text), croppedDataUrl });
     renderClipResults();
     statusEl.textContent = `認識完了（${text.length}文字）`;
 
@@ -997,19 +998,40 @@ function applyClipResults() {
   if (clipState.results.length === 0) { closeClipper(); return; }
 
   // Merge all clip texts into OCR result
-  const allText = clipState.results.map((r, i) => `--- 範囲${i + 1} ---\n${r.text}`).join('\n\n');
+  const allText = clipState.results.map((r, i) =>
+    clipState.results.length > 1 ? `--- 範囲${i + 1} ---\n${r.text}` : r.text
+  ).join('\n\n');
   document.getElementById('ocrResult').value = allText;
+
+  // Replace upload files with cropped images
+  uploadFiles = clipState.results.map((r, i) => {
+    // Convert dataUrl to File object
+    const blob = dataUrlToBlob(r.croppedDataUrl);
+    const fileName = `clip_${i + 1}_${Date.now()}.png`;
+    const file = new File([blob], fileName, { type: 'image/png' });
+    return { file, dataUrl: r.croppedDataUrl };
+  });
+  renderUploadPreview();
+  updateSubmitBtn();
 
   // If exactly one result, try auto-filling structured fields
   if (clipState.results.length === 1) {
-    const parsed = clipState.results[0].parsed;
-    autoFillFields(parsed);
+    autoFillFields(clipState.results[0].parsed);
   }
 
   // Show parse button
-  document.getElementById('btnParse').style.display = clipState.results.length > 0 ? 'inline-block' : 'none';
+  document.getElementById('btnParse').style.display = 'inline-block';
 
   closeClipper();
+}
+
+function dataUrlToBlob(dataUrl) {
+  const parts = dataUrl.split(',');
+  const mime = parts[0].match(/:(.*?);/)[1];
+  const binary = atob(parts[1]);
+  const arr = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+  return new Blob([arr], { type: mime });
 }
 
 function autoFillFields(parsed) {
