@@ -712,6 +712,7 @@ async function runOCR() {
     if (annotation && annotation.text) {
       resultEl.value = annotation.text.trim();
       statusEl.textContent = `認識完了（${annotation.text.length}文字） - 内容を確認・修正してください`;
+      document.getElementById('btnParse').style.display = 'inline-block';
     } else {
       resultEl.value = '';
       statusEl.textContent = 'テキストが検出されませんでした';
@@ -722,6 +723,340 @@ async function runOCR() {
   } catch (e) {
     console.error('Vision API error:', e);
     statusEl.textContent = 'OCRエラー: ' + e.message;
+  }
+}
+
+// ===== クリッピング＆範囲OCR =====
+let clipState = { img: null, startX: 0, startY: 0, endX: 0, endY: 0, dragging: false, results: [] };
+
+function openClipper() {
+  if (uploadFiles.length === 0) { alert('先に画像を選択してください'); return; }
+  const modal = document.getElementById('clipperModal');
+  modal.classList.add('active');
+  clipState.results = [];
+  renderClipResults();
+
+  const img = new Image();
+  img.onload = () => {
+    clipState.img = img;
+    const canvas = document.getElementById('clipperCanvas');
+    const wrap = document.getElementById('clipperCanvasWrap');
+    // Fit canvas to modal width while keeping aspect ratio
+    const maxW = wrap.clientWidth || 860;
+    const scale = Math.min(1, maxW / img.width);
+    canvas.width = img.width * scale;
+    canvas.height = img.height * scale;
+    clipState.scale = scale;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    setupClipperEvents(canvas);
+  };
+  img.src = uploadFiles[0].dataUrl;
+}
+
+function closeClipper() {
+  document.getElementById('clipperModal').classList.remove('active');
+}
+
+function setupClipperEvents(canvas) {
+  // Remove old listeners by replacing element
+  const newCanvas = canvas.cloneNode(true);
+  canvas.parentNode.replaceChild(newCanvas, canvas);
+  const ctx = newCanvas.getContext('2d');
+
+  newCanvas.addEventListener('mousedown', e => {
+    const rect = newCanvas.getBoundingClientRect();
+    clipState.startX = e.clientX - rect.left;
+    clipState.startY = e.clientY - rect.top;
+    clipState.dragging = true;
+  });
+
+  newCanvas.addEventListener('mousemove', e => {
+    if (!clipState.dragging) return;
+    const rect = newCanvas.getBoundingClientRect();
+    clipState.endX = e.clientX - rect.left;
+    clipState.endY = e.clientY - rect.top;
+    // Redraw image and selection rectangle
+    ctx.drawImage(clipState.img, 0, 0, newCanvas.width, newCanvas.height);
+    // Draw existing results as green rects
+    clipState.results.forEach(r => {
+      ctx.strokeStyle = '#2ed573'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
+      ctx.strokeRect(r.x * clipState.scale, r.y * clipState.scale, r.w * clipState.scale, r.h * clipState.scale);
+      ctx.setLineDash([]);
+    });
+    // Draw current selection
+    const sx = clipState.startX, sy = clipState.startY;
+    const w = clipState.endX - sx, h = clipState.endY - sy;
+    ctx.strokeStyle = '#e94560'; ctx.lineWidth = 2; ctx.setLineDash([6, 3]);
+    ctx.strokeRect(sx, sy, w, h);
+    ctx.fillStyle = 'rgba(233,69,96,0.15)';
+    ctx.fillRect(sx, sy, w, h);
+    ctx.setLineDash([]);
+  });
+
+  newCanvas.addEventListener('mouseup', e => {
+    if (!clipState.dragging) return;
+    clipState.dragging = false;
+    const rect = newCanvas.getBoundingClientRect();
+    clipState.endX = e.clientX - rect.left;
+    clipState.endY = e.clientY - rect.top;
+    const w = Math.abs(clipState.endX - clipState.startX);
+    const h = Math.abs(clipState.endY - clipState.startY);
+    document.getElementById('clipOcrBtn').disabled = (w < 10 || h < 10);
+  });
+
+  // Touch support
+  newCanvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const rect = newCanvas.getBoundingClientRect();
+    const t = e.touches[0];
+    clipState.startX = t.clientX - rect.left;
+    clipState.startY = t.clientY - rect.top;
+    clipState.dragging = true;
+  }, { passive: false });
+
+  newCanvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (!clipState.dragging) return;
+    const rect = newCanvas.getBoundingClientRect();
+    const t = e.touches[0];
+    clipState.endX = t.clientX - rect.left;
+    clipState.endY = t.clientY - rect.top;
+    ctx.drawImage(clipState.img, 0, 0, newCanvas.width, newCanvas.height);
+    clipState.results.forEach(r => {
+      ctx.strokeStyle = '#2ed573'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
+      ctx.strokeRect(r.x * clipState.scale, r.y * clipState.scale, r.w * clipState.scale, r.h * clipState.scale);
+      ctx.setLineDash([]);
+    });
+    const sx = clipState.startX, sy = clipState.startY;
+    const w = clipState.endX - sx, h = clipState.endY - sy;
+    ctx.strokeStyle = '#e94560'; ctx.lineWidth = 2; ctx.setLineDash([6, 3]);
+    ctx.strokeRect(sx, sy, w, h);
+    ctx.fillStyle = 'rgba(233,69,96,0.15)';
+    ctx.fillRect(sx, sy, w, h);
+    ctx.setLineDash([]);
+  }, { passive: false });
+
+  newCanvas.addEventListener('touchend', e => {
+    clipState.dragging = false;
+    const w = Math.abs(clipState.endX - clipState.startX);
+    const h = Math.abs(clipState.endY - clipState.startY);
+    document.getElementById('clipOcrBtn').disabled = (w < 10 || h < 10);
+  });
+}
+
+function resetClipSelection() {
+  const canvas = document.getElementById('clipperCanvas');
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(clipState.img, 0, 0, canvas.width, canvas.height);
+  // Redraw existing result rects
+  clipState.results.forEach(r => {
+    ctx.strokeStyle = '#2ed573'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
+    ctx.strokeRect(r.x * clipState.scale, r.y * clipState.scale, r.w * clipState.scale, r.h * clipState.scale);
+    ctx.setLineDash([]);
+  });
+  document.getElementById('clipOcrBtn').disabled = true;
+  document.getElementById('clipOcrStatus').textContent = '';
+}
+
+async function runClipOCR() {
+  if (typeof VISION_API_KEY === 'undefined' || !VISION_API_KEY) { alert('Vision APIキーが設定されていません'); return; }
+
+  const statusEl = document.getElementById('clipOcrStatus');
+  statusEl.textContent = '使用量を確認中...';
+  await loadOcrUsage();
+  const safetyMargin = 50;
+  if (ocrUsage.used >= ocrUsage.limit - safetyMargin) {
+    alert(`今月のOCR使用量が安全上限に達しました。`);
+    statusEl.textContent = '';
+    return;
+  }
+
+  // Crop the selected area from the original image
+  const scale = clipState.scale;
+  const sx = Math.min(clipState.startX, clipState.endX) / scale;
+  const sy = Math.min(clipState.startY, clipState.endY) / scale;
+  const sw = Math.abs(clipState.endX - clipState.startX) / scale;
+  const sh = Math.abs(clipState.endY - clipState.startY) / scale;
+
+  const cropCanvas = document.createElement('canvas');
+  cropCanvas.width = sw;
+  cropCanvas.height = sh;
+  const cctx = cropCanvas.getContext('2d');
+  cctx.drawImage(clipState.img, sx, sy, sw, sh, 0, 0, sw, sh);
+
+  const base64 = cropCanvas.toDataURL('image/png').replace(/^data:image\/png;base64,/, '');
+
+  statusEl.textContent = 'Google Cloud Vision APIに送信中...';
+  try {
+    const resp = await fetch(
+      `https://vision.googleapis.com/v1/images:annotate?key=${VISION_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requests: [{
+            image: { content: base64 },
+            features: [{ type: 'DOCUMENT_TEXT_DETECTION', maxResults: 1 }],
+            imageContext: { languageHints: ['ja', 'en'] }
+          }]
+        })
+      }
+    );
+    if (!resp.ok) throw new Error(`API Error ${resp.status}`);
+    const result = await resp.json();
+    const text = result.responses?.[0]?.fullTextAnnotation?.text?.trim() || '';
+    await incrementOcrUsage();
+
+    if (!text) {
+      statusEl.textContent = 'テキストが検出されませんでした';
+      return;
+    }
+
+    // Save result with crop coordinates
+    clipState.results.push({ x: sx, y: sy, w: sw, h: sh, text, parsed: parseEffectText(text) });
+    renderClipResults();
+    statusEl.textContent = `認識完了（${text.length}文字）`;
+
+    // Redraw canvas with all result rects
+    resetClipSelection();
+  } catch (e) {
+    console.error('Clip OCR error:', e);
+    statusEl.textContent = 'OCRエラー: ' + e.message;
+  }
+}
+
+function parseEffectText(text) {
+  const parsed = {};
+  const lines = text.replace(/\r/g, '').split('\n');
+  const allText = lines.join(' ');
+
+  // DX3 エフェクト/アイテム等のフィールドパターン
+  const patterns = [
+    { key: 'タイミング', re: /タイミング[：:\s]*([^\n/／]+)/i },
+    { key: '判定', re: /判定[：:\s]*([^\n/／]+)/i },
+    { key: '対象', re: /対象[：:\s]*([^\n/／]+)/i },
+    { key: '射程', re: /射程[：:\s]*([^\n/／]+)/i },
+    { key: '侵蝕値', re: /侵蝕値?[：:\s]*([^\n/／]+)/i },
+    { key: '制限', re: /制限[：:\s]*([^\n/／]+)/i },
+    { key: '技能', re: /技能[：:\s]*([^\n/／]+)/i },
+    { key: 'Lv', re: /(?:LV|Lv|レベル)[：:\s]*(\d+)/i },
+    { key: '最大Lv', re: /最大(?:LV|Lv|レベル)[：:\s]*(\d+)/i },
+  ];
+
+  // Try line-based parsing first (field: value on same line)
+  for (const p of patterns) {
+    const m = allText.match(p.re);
+    if (m) parsed[p.key] = m[1].trim();
+  }
+
+  // Detect effect name: usually first line or line before タイミング
+  const firstLine = lines[0]?.trim();
+  if (firstLine && firstLine.length < 40 && !firstLine.match(/タイミング|判定|対象|射程|侵蝕/)) {
+    parsed['エフェクト名'] = firstLine;
+  }
+
+  // Try to detect シンドローム from known names
+  const syndromes = ['エンジェルハイロゥ','バロール','ブラックドッグ','ブラムストーカー','キメラ','エグザイル','ハヌマーン','モルフェウス','ノイマン','オルクス','サラマンドラ','ソラリス'];
+  for (const syn of syndromes) {
+    if (allText.includes(syn)) {
+      parsed['シンドローム'] = parsed['シンドローム'] ? parsed['シンドローム'] + '/' + syn : syn;
+    }
+  }
+
+  return parsed;
+}
+
+function renderClipResults() {
+  const el = document.getElementById('clipResults');
+  if (clipState.results.length === 0) { el.innerHTML = ''; return; }
+  el.innerHTML = clipState.results.map((r, i) => {
+    const parsedHtml = Object.keys(r.parsed).length > 0
+      ? `<div class="clip-parsed">${Object.entries(r.parsed).map(([k, v]) =>
+          `<div class="parsed-field"><span class="parsed-label">${k}:</span><span class="parsed-value">${v}</span></div>`
+        ).join('')}</div>`
+      : '';
+    return `<div class="clip-result-item">
+      <div class="clip-header">
+        <span class="clip-num">範囲 ${i + 1}</span>
+        <button class="clip-remove" onclick="removeClipResult(${i})">&times;</button>
+      </div>
+      <textarea rows="3" onchange="clipState.results[${i}].text=this.value; clipState.results[${i}].parsed=parseEffectText(this.value); renderClipResults();">${r.text}</textarea>
+      ${parsedHtml}
+    </div>`;
+  }).join('');
+}
+
+function removeClipResult(i) {
+  clipState.results.splice(i, 1);
+  renderClipResults();
+  resetClipSelection();
+}
+
+function applyClipResults() {
+  if (clipState.results.length === 0) { closeClipper(); return; }
+
+  // Merge all clip texts into OCR result
+  const allText = clipState.results.map((r, i) => `--- 範囲${i + 1} ---\n${r.text}`).join('\n\n');
+  document.getElementById('ocrResult').value = allText;
+
+  // If exactly one result, try auto-filling structured fields
+  if (clipState.results.length === 1) {
+    const parsed = clipState.results[0].parsed;
+    autoFillFields(parsed);
+  }
+
+  // Show parse button
+  document.getElementById('btnParse').style.display = clipState.results.length > 0 ? 'inline-block' : 'none';
+
+  closeClipper();
+}
+
+function autoFillFields(parsed) {
+  const container = document.getElementById('uploadFields');
+  if (!container || container.style.display === 'none') return;
+
+  const fieldMap = {
+    'タイミング': 'タイミング',
+    '技能': '技能',
+    '対象': '対象',
+    '射程': '射程',
+    '制限': '制限',
+    'シンドローム': 'シンドローム',
+    '記載本': '記載本',
+  };
+
+  for (const [parseKey, fieldName] of Object.entries(fieldMap)) {
+    if (!parsed[parseKey]) continue;
+    const el = container.querySelector(`[data-field="${fieldName}"]`);
+    if (!el) continue;
+    if (el.tagName === 'SELECT') {
+      // Try matching option
+      const options = [...el.options];
+      const match = options.find(o => parsed[parseKey].includes(o.value));
+      if (match) el.value = match.value;
+    } else {
+      el.value = parsed[parseKey];
+    }
+  }
+
+  // Also set effect name as memo if available
+  if (parsed['エフェクト名']) {
+    const memoEl = document.getElementById('uploadMemo');
+    if (memoEl && !memoEl.value) memoEl.value = parsed['エフェクト名'];
+  }
+}
+
+function parseOcrToFields() {
+  const text = document.getElementById('ocrResult').value;
+  if (!text) return;
+  const parsed = parseEffectText(text);
+  autoFillFields(parsed);
+  if (Object.keys(parsed).length > 0) {
+    const summary = Object.entries(parsed).map(([k, v]) => `${k}: ${v}`).join('\n');
+    document.getElementById('ocrStatus').textContent = `${Object.keys(parsed).length}件のフィールドを検出・入力しました`;
+  } else {
+    document.getElementById('ocrStatus').textContent = '自動認識可能なフィールドが見つかりませんでした';
   }
 }
 
