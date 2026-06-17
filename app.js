@@ -31,11 +31,14 @@ const defaultCategorySchemas = [
     fields: [
       { name: '記載本', type: 'text', placeholder: '基本ルールブック1' },
       { name: 'シンドローム', type: 'select', options: ['エンジェルハイロゥ','バロール','ブラックドッグ','ブラムストーカー','キメラ','エグザイル','ハヌマーン','ミストルティン','モルフェウス','ノイマン','オルクス','サラマンドラ','ソラリス','ウロボロス'] },
+      { name: '最大レベル', type: 'text', placeholder: '3, 5, 10 等' },
       { name: 'タイミング', type: 'select', options: ['メジャー','マイナー','セットアップ','イニシアチブ','クリンナップ','リアクション','オート','常時'] },
       { name: '技能', type: 'text', placeholder: '白兵, 射撃, RC 等' },
+      { name: '難易度', type: 'text', placeholder: '対決, 自動成功 等' },
       { name: '対象', type: 'text', placeholder: '単体, 範囲(選択) 等' },
       { name: '射程', type: 'text', placeholder: '武器, 視界, 至近 等' },
-      { name: '制限', type: 'text', placeholder: '80%, 100%, なし 等' },
+      { name: '侵蝕値', type: 'text', placeholder: '3, 2D10 等' },
+      { name: '制限', type: 'text', placeholder: '80%, 100%, なし, ー 等' },
     ]
   },
   {
@@ -780,9 +783,19 @@ async function runOCR() {
     const annotation = result.responses?.[0]?.fullTextAnnotation;
 
     if (annotation && annotation.text) {
-      resultEl.value = annotation.text.trim();
-      statusEl.textContent = `認識完了（${annotation.text.length}文字） - 内容を確認・修正してください`;
+      const ocrText = annotation.text.trim();
+      resultEl.value = ocrText;
       document.getElementById('btnParse').style.display = 'inline-block';
+
+      // DX3自動パース＆フィールド入力
+      const parsed = parseEffectText(ocrText);
+      const filledKeys = Object.keys(parsed).filter(k => k !== 'エフェクト名' && k !== '効果');
+      autoFillFields(parsed);
+      if (filledKeys.length > 0) {
+        statusEl.textContent = `認識完了（${ocrText.length}文字）— ${filledKeys.length}項目を自動入力: ${filledKeys.join(', ')}`;
+      } else {
+        statusEl.textContent = `認識完了（${ocrText.length}文字） - 内容を確認・修正してください`;
+      }
     } else {
       resultEl.value = '';
       statusEl.textContent = 'テキストが検出されませんでした';
@@ -999,38 +1012,85 @@ async function runClipOCR() {
 
 function parseEffectText(text) {
   const parsed = {};
-  const lines = text.replace(/\r/g, '').split('\n');
+  if (!text) return parsed;
+
+  // Normalize: full-width colon → half-width, trim each line
+  const normalized = text.replace(/\r/g, '').replace(/：/g, ':');
+  const lines = normalized.split('\n').map(l => l.trim()).filter(l => l);
   const allText = lines.join(' ');
 
-  // DX3 エフェクト/アイテム等のフィールドパターン
+  // DX3 field patterns — handles "技能:－ 難易度:自動成功" on same line
+  // Each pattern extracts value until next known field label or end of context
+  const fieldLabels = '(?:タイミング|判定|技能|難易度|対象|射程|侵蝕値|侵食値|制限|効果|最大レベル|最大Lv)';
+  const valUntilNext = new RegExp(`(?=${fieldLabels}:|$)`, 'g');
+
   const patterns = [
-    { key: 'タイミング', re: /タイミング[：:\s]*([^\n/／]+)/i },
-    { key: '判定', re: /判定[：:\s]*([^\n/／]+)/i },
-    { key: '対象', re: /対象[：:\s]*([^\n/／]+)/i },
-    { key: '射程', re: /射程[：:\s]*([^\n/／]+)/i },
-    { key: '侵蝕値', re: /侵蝕値?[：:\s]*([^\n/／]+)/i },
-    { key: '制限', re: /制限[：:\s]*([^\n/／]+)/i },
-    { key: '技能', re: /技能[：:\s]*([^\n/／]+)/i },
-    { key: 'Lv', re: /(?:LV|Lv|レベル)[：:\s]*(\d+)/i },
-    { key: '最大Lv', re: /最大(?:LV|Lv|レベル)[：:\s]*(\d+)/i },
+    { key: 'タイミング', re: /タイミング\s*[:]\s*(.+?)(?=\s+(?:判定|技能|難易度|対象|射程|侵蝕値|侵食値|制限|効果)|$)/m },
+    { key: '判定', re: /判定\s*[:]\s*(.+?)(?=\s+(?:タイミング|技能|難易度|対象|射程|侵蝕値|侵食値|制限|効果)|$)/m },
+    { key: '技能', re: /技能\s*[:]\s*(.+?)(?=\s+(?:タイミング|判定|難易度|対象|射程|侵蝕値|侵食値|制限|効果)|$)/m },
+    { key: '難易度', re: /難易度\s*[:]\s*(.+?)(?=\s+(?:タイミング|判定|技能|対象|射程|侵蝕値|侵食値|制限|効果)|$)/m },
+    { key: '対象', re: /対象\s*[:]\s*(.+?)(?=\s+(?:タイミング|判定|技能|難易度|射程|侵蝕値|侵食値|制限|効果)|$)/m },
+    { key: '射程', re: /射程\s*[:]\s*(.+?)(?=\s+(?:タイミング|判定|技能|難易度|対象|侵蝕値|侵食値|制限|効果)|$)/m },
+    { key: '侵蝕値', re: /侵[蝕食]値?\s*[:]\s*(.+?)(?=\s+(?:タイミング|判定|技能|難易度|対象|射程|制限|効果)|$)/m },
+    { key: '制限', re: /制限\s*[:]\s*(.+?)(?=\s+(?:タイミング|判定|技能|難易度|対象|射程|侵蝕値|侵食値|効果)|$)/m },
+    { key: '最大レベル', re: /最大(?:レベル|Lv|LV)\s*[:]\s*(\d+)/m },
   ];
 
-  // Try line-based parsing first (field: value on same line)
+  // Try matching against each line individually and against allText
   for (const p of patterns) {
-    const m = allText.match(p.re);
-    if (m) parsed[p.key] = m[1].trim();
+    // First try line-by-line (more accurate for multi-field lines)
+    let found = false;
+    for (const line of lines) {
+      const m = line.match(p.re);
+      if (m) { parsed[p.key] = m[1].trim().replace(/\s+$/, ''); found = true; break; }
+    }
+    // Fallback to full text
+    if (!found) {
+      const m = allText.match(p.re);
+      if (m) parsed[p.key] = m[1].trim().replace(/\s+$/, '');
+    }
   }
 
-  // Detect effect name: usually first line or line before タイミング
-  const firstLine = lines[0]?.trim();
-  if (firstLine && firstLine.length < 40 && !firstLine.match(/タイミング|判定|対象|射程|侵蝕/)) {
-    parsed['エフェクト名'] = firstLine;
+  // Clean up values: remove trailing field labels that leaked in
+  for (const key of Object.keys(parsed)) {
+    parsed[key] = parsed[key]
+      .replace(/\s*(タイミング|判定|技能|難易度|対象|射程|侵蝕値|侵食値|制限|効果|最大レベル).*$/, '')
+      .replace(/[\s　]+$/, '');
   }
 
-  // Try to detect シンドローム from known names (longer names first to avoid partial match)
+  // タイミング: normalize common OCR variations
+  if (parsed['タイミング']) {
+    const t = parsed['タイミング'];
+    if (/マイナー/.test(t)) parsed['タイミング'] = 'マイナー';
+    else if (/メジャー/.test(t)) parsed['タイミング'] = 'メジャー';
+    else if (/セットアップ/.test(t)) parsed['タイミング'] = 'セットアップ';
+    else if (/イニシアチブ/.test(t)) parsed['タイミング'] = 'イニシアチブ';
+    else if (/クリンナップ/.test(t)) parsed['タイミング'] = 'クリンナップ';
+    else if (/リアクション/.test(t)) parsed['タイミング'] = 'リアクション';
+    else if (/オート/.test(t)) parsed['タイミング'] = 'オート';
+    else if (/常時/.test(t)) parsed['タイミング'] = '常時';
+  }
+
+  // 効果テキスト
+  const effMatch = allText.match(/効果\s*[:]\s*([\s\S]*)/);
+  if (effMatch) parsed['効果'] = effMatch[1].trim();
+
+  // Detect effect name: first non-field line, often has ruby text (ふりがな) above
+  for (const line of lines) {
+    const clean = line.replace(/[\s　]/g, '');
+    if (clean.length === 0) continue;
+    if (/^(タイミング|判定|技能|難易度|対象|射程|侵蝕値|侵食値|制限|効果|最大レベル|最大Lv)/i.test(clean)) continue;
+    // Skip very short lines (likely ruby/furigana)
+    if (clean.length <= 3 && /^[\u3040-\u309F]+$/.test(clean)) continue;
+    if (clean.length < 50) {
+      parsed['エフェクト名'] = line.trim();
+      break;
+    }
+  }
+
+  // Detect シンドローム from known names
   const syndromes = ['エンジェルハイロゥ','ブラムストーカー','ブラックドッグ','サラマンドラ','ミストルティン','モルフェウス','ハヌマーン','ウロボロス','エグザイル','ノイマン','ソラリス','バロール','オルクス','キメラ'];
   for (const syn of syndromes) {
-    // Match as standalone word: preceded/followed by whitespace, punctuation, or line boundary
     const re = new RegExp('(?:^|[\\s/／・、,\\(（])' + syn + '(?:$|[\\s/／・、,\\)）])', 'm');
     if (re.test(allText)) {
       parsed['シンドローム'] = parsed['シンドローム'] ? parsed['シンドローム'] + '/' + syn : syn;
@@ -1038,6 +1098,13 @@ function parseEffectText(text) {
   }
 
   return parsed;
+}
+
+// DX3カテゴリ自動判別
+function detectDX3Category(parsed) {
+  if (parsed['タイミング'] || parsed['侵蝕値'] || parsed['最大レベル']) return 'エフェクト';
+  if (/Dロイス|ディーロイス/.test(JSON.stringify(parsed))) return 'Dロイス';
+  return '';
 }
 
 function renderClipResults() {
@@ -1107,30 +1174,54 @@ function dataUrlToBlob(dataUrl) {
 }
 
 function autoFillFields(parsed) {
+  // Auto-detect system and category for DX3
+  const sysEl = document.getElementById('uploadSystem');
+  const catEl = document.getElementById('uploadCategory');
+  const detectedCat = detectDX3Category(parsed);
+
+  if (detectedCat && sysEl.value === 'ダブルクロス3rd') {
+    // Set category and render fields
+    catEl.value = detectedCat;
+    onUploadCategoryChange();
+  } else if (detectedCat && !sysEl.value) {
+    // Auto-select DX3 if fields look like DX3
+    sysEl.value = 'ダブルクロス3rd';
+    sysEl.dispatchEvent(new Event('change'));
+    catEl.value = detectedCat;
+    onUploadCategoryChange();
+  }
+
   const container = document.getElementById('uploadFields');
   if (!container || container.style.display === 'none') return;
 
   const fieldMap = {
     'タイミング': 'タイミング',
     '技能': '技能',
+    '難易度': '難易度',
     '対象': '対象',
     '射程': '射程',
+    '侵蝕値': '侵蝕値',
     '制限': '制限',
+    '最大レベル': '最大レベル',
     'シンドローム': 'シンドローム',
     '記載本': '記載本',
   };
 
+  let filledCount = 0;
   for (const [parseKey, fieldName] of Object.entries(fieldMap)) {
     if (!parsed[parseKey]) continue;
     const el = container.querySelector(`[data-field="${fieldName}"]`);
     if (!el) continue;
     if (el.tagName === 'SELECT') {
-      // Try matching option
       const options = [...el.options];
-      const match = options.find(o => parsed[parseKey].includes(o.value));
-      if (match) el.value = match.value;
+      // Exact match first, then partial
+      const exact = options.find(o => o.value === parsed[parseKey]);
+      const partial = options.find(o => o.value && parsed[parseKey].includes(o.value));
+      if (exact) { el.value = exact.value; filledCount++; }
+      else if (partial) { el.value = partial.value; filledCount++; }
     } else {
       el.value = parsed[parseKey];
+      filledCount++;
     }
   }
 
