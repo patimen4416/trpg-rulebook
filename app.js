@@ -13,7 +13,7 @@ let currentTags = [];
 let uploadFiles = [];
 let filteredList = [];
 let currentLbIndex = -1;
-let viewMode = 'grid'; // 'grid' | 'list'
+let viewMode = 'grid'; // 'grid' | 'text' | 'list'
 
 const chapterTagNames = ['キャラ作成', '戦闘', '判定', 'ワールド', 'セッション進行'];
 
@@ -322,6 +322,9 @@ async function renderCards() {
   if (viewMode === 'list') {
     grid.className = 'list-view';
     grid.innerHTML = renderListView();
+  } else if (viewMode === 'text') {
+    grid.className = 'grid grid-text';
+    grid.innerHTML = filteredList.map((s, idx) => renderTextCard(s, idx)).join('');
   } else {
     grid.className = 'grid';
     grid.innerHTML = filteredList.map((s, idx) => renderCardItem(s, idx)).join('');
@@ -357,6 +360,73 @@ function renderCardItem(s, idx) {
         <span>${s.uploader_name}</span>
         <span>${dateStr}</span>
       </div>
+    </div>
+  </div>`;
+}
+
+function renderTextCard(s, idx) {
+  const color = getSystemColor(s.system_name);
+  const fields = s.structured_fields || {};
+  const extracted = s.extracted_text || '';
+
+  // Parse extracted text into structured display
+  const parsed = extracted ? parseEffectText(extracted) : {};
+  // Merge with stored structured_fields (structured_fields takes priority)
+  const merged = { ...parsed, ...fields };
+
+  const effectName = merged['エフェクト名'] || s.title || s.memo || '(無題)';
+  const syndrome = merged['シンドローム'] || '';
+
+  // DX3 effect layout fields
+  const layoutFields = [
+    ['タイミング', merged['タイミング']],
+    ['判定', merged['判定']],
+    ['技能', merged['技能']],
+    ['難易度', merged['難易度']],
+    ['対象', merged['対象']],
+    ['射程', merged['射程']],
+    ['侵蝕値', merged['侵蝕値']],
+    ['制限', merged['制限']],
+    ['最大Lv', merged['最大Lv'] || merged['Lv']],
+  ].filter(([, v]) => v);
+
+  // Effect description: remove parsed field lines from extracted text
+  let description = extracted;
+  if (description) {
+    const removePatterns = /^(タイミング|判定|技能|難易度|対象|射程|侵蝕値?|制限|最大(?:LV|Lv|レベル)|LV|Lv)[：:\s].*/gim;
+    description = description.replace(removePatterns, '').trim();
+    // Remove effect name from first line if it matches
+    if (effectName && description.startsWith(effectName)) {
+      description = description.slice(effectName.length).trim();
+    }
+    // Take only the "効果" description part (after all field lines)
+    const effMatch = description.match(/効果[:：\s]*([\s\S]*)/);
+    if (effMatch) description = effMatch[1].trim();
+    // Limit display length
+    if (description.length > 200) description = description.slice(0, 200) + '…';
+  }
+
+  const fieldsHtml = layoutFields.length > 0
+    ? `<div class="tcard-fields">${layoutFields.map(([k, v]) =>
+        `<div class="tcard-field"><span class="tcard-label">${k}</span><span class="tcard-value">${v}</span></div>`
+      ).join('')}</div>`
+    : '';
+
+  const descHtml = description
+    ? `<div class="tcard-desc">${description}</div>`
+    : (extracted ? `<div class="tcard-desc tcard-full">${extracted.slice(0, 300)}${extracted.length > 300 ? '…' : ''}</div>` : '<div class="tcard-desc tcard-empty">テキスト未抽出</div>');
+
+  return `
+  <div class="card tcard" onclick="openLightbox(${idx})">
+    <div class="tcard-header" style="border-left: 4px solid ${color};">
+      <div class="tcard-name">${effectName}</div>
+      ${syndrome ? `<div class="tcard-syndrome" style="color:${color}">${syndrome}</div>` : ''}
+    </div>
+    ${fieldsHtml}
+    ${descHtml}
+    <div class="card-meta">
+      <span>${s.system_name}${s.category ? ' / ' + s.category : ''}</span>
+      <span>${s.page_number ? 'P' + s.page_number : ''}</span>
     </div>
   </div>`;
 }
