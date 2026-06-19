@@ -185,11 +185,12 @@ body {
 
 /* ===== テキストカードグリッド ===== */
 .grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-width: 720px;
+  margin-left: 36px;
 }
-.grid-text { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
 
 .card {
   background: var(--surface); border: 1px solid var(--surface2);
@@ -260,39 +261,62 @@ body {
 .tcard-action-btn.btn-del:hover { border-color: var(--danger); color: var(--danger); }
 
 /* ===== 並べ替え（ドラッグ） ===== */
+.card { position: relative; }
+.card .order-num {
+  position: absolute; top: 8px; left: -32px;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--surface2); color: var(--text-dim);
+  font-size: 11px; font-weight: bold;
+  display: flex; align-items: center; justify-content: center;
+}
 .card.dragging {
   opacity: 0.3;
   border: 2px dashed var(--accent);
-  transform: scale(0.95);
 }
-.card.drag-over {
-  position: relative;
+
+/* ドロップスロット（カード間の挿入ポイント） */
+.drop-slot {
+  height: 8px;
+  margin: 0;
+  border-radius: 4px;
+  transition: height 0.15s, background 0.15s, margin 0.15s;
 }
-.card.drag-over::before {
-  content: '▼ ここに挿入';
-  position: absolute;
-  top: -18px; left: 0; right: 0;
-  text-align: center;
-  font-size: 11px; font-weight: bold;
+.drop-slot.drag-over {
+  height: 48px;
+  margin: 4px 0;
+  background: rgba(46, 213, 115, 0.15);
+  border: 2px dashed #2ed573;
+  display: flex; align-items: center; justify-content: center;
+}
+.drop-slot.drag-over::after {
+  content: '▼ ここに移動';
   color: #2ed573;
+  font-size: 12px;
+  font-weight: bold;
   letter-spacing: 1px;
-  pointer-events: none;
-  z-index: 5;
 }
-.card.drag-over::after {
-  content: '';
-  position: absolute;
-  top: -4px; left: 0; right: 0;
-  height: 4px;
-  background: #2ed573;
-  border-radius: 2px;
-  box-shadow: 0 0 8px rgba(46, 213, 115, 0.6);
-  pointer-events: none;
-  z-index: 5;
+
+/* 最後尾ドロップゾーン */
+.drop-slot-end {
+  min-height: 60px;
+  margin-top: 4px;
+  border: 2px dashed var(--surface2);
+  border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-dim); font-size: 12px;
+  transition: all 0.15s;
 }
+.drop-slot-end.drag-over {
+  border-color: #2ed573;
+  background: rgba(46, 213, 115, 0.15);
+  color: #2ed573;
+  font-weight: bold;
+}
+
 .drag-handle {
-  cursor: grab; color: var(--text-dim); font-size: 14px;
+  cursor: grab; color: var(--text-dim); font-size: 16px;
   user-select: none; touch-action: none;
+  padding: 2px;
 }
 .drag-handle:hover { color: var(--accent); }
 .drag-handle:active { cursor: grabbing; color: var(--accent); }
@@ -599,7 +623,7 @@ body {
     box-shadow: 0 4px 12px rgba(233,69,96,0.4); cursor: pointer; z-index: 40;
   }
 
-  .grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+  .grid { max-width: 100%; }
   .card-body { padding: 8px 10px; }
   .card-title { font-size: 12px; }
   .card-tag { font-size: 9px; padding: 1px 5px; }
