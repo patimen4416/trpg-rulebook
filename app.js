@@ -466,15 +466,22 @@ function onDragStart(e) {
 function onDragOver(e) {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
+  // Show insertion indicator on the hovered card
+  const card = e.currentTarget;
+  document.querySelectorAll('.card.drag-over').forEach(c => { if (c !== card) c.classList.remove('drag-over'); });
+  card.classList.add('drag-over');
 }
 
 function onDragEnter(e) {
   e.preventDefault();
-  e.currentTarget.classList.add('drag-over');
 }
 
 function onDragLeave(e) {
-  e.currentTarget.classList.remove('drag-over');
+  // Only remove if actually leaving the card (not entering a child)
+  const related = e.relatedTarget;
+  if (!e.currentTarget.contains(related)) {
+    e.currentTarget.classList.remove('drag-over');
+  }
 }
 
 function onDrop(e) {
