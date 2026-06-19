@@ -261,17 +261,41 @@ body {
 
 /* ===== 並べ替え（ドラッグ） ===== */
 .card.dragging {
-  opacity: 0.4;
+  opacity: 0.3;
   border: 2px dashed var(--accent);
+  transform: scale(0.95);
 }
 .card.drag-over {
-  border-top: 3px solid var(--success);
+  position: relative;
+}
+.card.drag-over::before {
+  content: '▼ ここに挿入';
+  position: absolute;
+  top: -18px; left: 0; right: 0;
+  text-align: center;
+  font-size: 11px; font-weight: bold;
+  color: #2ed573;
+  letter-spacing: 1px;
+  pointer-events: none;
+  z-index: 5;
+}
+.card.drag-over::after {
+  content: '';
+  position: absolute;
+  top: -4px; left: 0; right: 0;
+  height: 4px;
+  background: #2ed573;
+  border-radius: 2px;
+  box-shadow: 0 0 8px rgba(46, 213, 115, 0.6);
+  pointer-events: none;
+  z-index: 5;
 }
 .drag-handle {
   cursor: grab; color: var(--text-dim); font-size: 14px;
   user-select: none; touch-action: none;
 }
-.drag-handle:active { cursor: grabbing; }
+.drag-handle:hover { color: var(--accent); }
+.drag-handle:active { cursor: grabbing; color: var(--accent); }
 
 /* ===== リスト表示 ===== */
 .list-view { width: 100%; }
