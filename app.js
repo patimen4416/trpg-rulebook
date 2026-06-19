@@ -169,7 +169,12 @@ async function loadScreenshots() {
     screenshots = saved ? JSON.parse(saved) : [];
     return;
   }
-  const { data, error } = await sb.from('rulebook_screenshots').select('*').order('sort_order', { ascending: true, nullsFirst: false }).order('created_at', { ascending: false });
+  let { data, error } = await sb.from('rulebook_screenshots').select('*').order('sort_order', { ascending: true, nullsFirst: false }).order('created_at', { ascending: false });
+  if (error && error.code === '42703') {
+    // sort_order column doesn't exist yet — fallback to created_at
+    const fallback = await sb.from('rulebook_screenshots').select('*').order('created_at', { ascending: false });
+    data = fallback.data; error = fallback.error;
+  }
   if (error) { console.error('loadScreenshots error:', error); return; }
   screenshots = data || [];
 }
