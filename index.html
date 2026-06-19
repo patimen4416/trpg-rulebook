@@ -49,7 +49,7 @@
   </div>
 
   <!-- モバイルFAB -->
-  <button class="fab-upload" onclick="openUpload()">+</button>
+  <button class="fab-upload" onclick="openRegister()">+</button>
 
   <div class="layout">
     <!-- サイドバー -->
@@ -103,48 +103,48 @@
       <div class="toolbar">
         <span class="result-count" id="resultCount"></span>
         <div class="view-toggle">
-          <button class="view-btn active" data-mode="grid" onclick="setViewMode('grid')">画像</button>
           <button class="view-btn" data-mode="text" onclick="setViewMode('text')">テキスト</button>
           <button class="view-btn" data-mode="list" onclick="setViewMode('list')">リスト</button>
         </div>
         <button class="sidebar-toggle" onclick="toggleSidebar()">フィルタ</button>
-        <button class="upload-btn" onclick="openUpload()">+ アップロード</button>
+        <button class="btn-save-order" id="btnSaveOrder" onclick="saveOrder()" style="display:none;">順序を保存</button>
+        <button class="upload-btn" onclick="openRegister()">+ 新規登録</button>
       </div>
       <div id="loadingIndicator" class="loading" style="display:none;">読み込み中...</div>
-      <div class="grid" id="cardGrid"></div>
+      <div class="grid grid-text" id="cardGrid"></div>
     </div>
   </div>
 </div>
 
-<!-- ===== アップロードモーダル ===== -->
-<div class="modal-overlay" id="uploadModal">
+<!-- ===== 登録モーダル ===== -->
+<div class="modal-overlay" id="registerModal">
   <div class="modal">
     <div class="modal-header">
-      <h2>スクリーンショットをアップロード</h2>
-      <button class="modal-close" onclick="closeUpload()">&times;</button>
+      <h2>データを登録</h2>
+      <button class="modal-close" onclick="closeRegister()">&times;</button>
     </div>
     <div class="modal-body">
-      <!-- ドロップゾーン -->
-      <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
-        <p style="font-size:32px; margin-bottom:8px;">+</p>
-        <p>ここに画像をドラッグ＆ドロップ</p>
-        <p>または <span class="browse">ファイルを選択</span></p>
-        <p style="font-size:11px; margin-top:8px; color:var(--text-dim);">複数枚OK（PNG / JPG / WebP）</p>
-      </div>
-      <input type="file" id="fileInput" accept="image/*" multiple style="display:none" onchange="handleFiles(this.files)">
-      <div class="upload-preview" id="uploadPreview"></div>
-
-      <!-- クリッピング＆OCR -->
-      <div class="ocr-section">
-        <div class="ocr-btn-row">
-          <button class="btn-ocr" onclick="runOCR()">全体をOCR</button>
-          <button class="btn-ocr btn-clip" onclick="openClipper()">範囲を選択してOCR</button>
+      <!-- OCR補助（折りたたみ） -->
+      <details class="ocr-details">
+        <summary class="ocr-summary">画像からテキスト読み取り（OCR補助）</summary>
+        <div class="ocr-inner">
+          <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+            <p style="font-size:24px; margin-bottom:4px;">+</p>
+            <p>画像をドラッグ＆ドロップ or 選択</p>
+            <p style="font-size:11px; margin-top:4px; color:var(--text-dim);">PNG / JPG / WebP</p>
+          </div>
+          <input type="file" id="fileInput" accept="image/*" style="display:none" onchange="handleFiles(this.files)">
+          <div class="upload-preview" id="uploadPreview"></div>
+          <div class="ocr-btn-row">
+            <button class="btn-ocr" onclick="runOCR()">全体をOCR</button>
+            <button class="btn-ocr btn-clip" onclick="openClipper()">範囲を選択してOCR</button>
+          </div>
+          <span class="ocr-status" id="ocrStatus"></span>
+          <div class="ocr-usage-info" id="ocrUsageInfo" style="display:none;"></div>
+          <textarea id="ocrResult" class="ocr-textarea" rows="3" placeholder="認識結果がここに表示されます"></textarea>
+          <button class="btn-parse" id="btnParse" onclick="parseOcrToFields()" style="display:none;">OCR結果をフィールドに自動入力</button>
         </div>
-        <span class="ocr-status" id="ocrStatus"></span>
-        <div class="ocr-usage-info" id="ocrUsageInfo" style="display:none;"></div>
-        <textarea id="ocrResult" class="ocr-textarea" rows="4" placeholder="認識結果がここに表示されます。手動で修正できます。"></textarea>
-        <button class="btn-parse" id="btnParse" onclick="parseOcrToFields()" style="display:none;">OCR結果をフィールドに自動入力</button>
-      </div>
+      </details>
 
       <!-- システム選択 -->
       <div class="form-group">
@@ -178,38 +178,23 @@
         <div class="quick-tags" id="quickTags"></div>
       </div>
 
-      <!-- メモ -->
+      <!-- タイトル / メモ -->
       <div class="form-group">
         <label>タイトル / メモ（任意）</label>
         <input type="text" id="uploadMemo" placeholder="例: エンジェルハイロゥのコンボ参考用">
+      </div>
+
+      <!-- 抽出テキスト（手入力可） -->
+      <div class="form-group">
+        <label>テキスト内容（手入力 or OCR結果）</label>
+        <textarea id="uploadExtractedText" class="ocr-textarea" rows="4" placeholder="ルールテキストを直接入力、またはOCRで自動入力"></textarea>
       </div>
     </div>
     <div class="modal-footer">
       <span class="upload-status" id="uploadStatus"></span>
       <div style="display:flex; gap:8px;">
-        <button class="btn-cancel" onclick="closeUpload()">キャンセル</button>
-        <button class="btn-submit" id="submitBtn" onclick="submitUpload()" disabled>アップロード</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ===== ライトボックス ===== -->
-<div class="lightbox" id="lightbox">
-  <button class="lb-close" onclick="closeLightbox()">&times;</button>
-  <button class="lb-nav lb-prev" onclick="navLightbox(-1)">&lsaquo;</button>
-  <button class="lb-nav lb-next" onclick="navLightbox(1)">&rsaquo;</button>
-  <div class="lb-content">
-    <div class="lb-img-wrap" id="lbImgWrap"></div>
-    <div class="lb-info">
-      <h3 id="lbTitle"></h3>
-      <div class="lb-tags" id="lbTags"></div>
-      <div id="lbFields" style="display:none;"></div>
-      <div id="lbExtractedText" style="display:none;"></div>
-      <p class="lb-meta" id="lbMeta"></p>
-      <div class="lb-actions">
-        <button class="btn-edit" onclick="openEditModal()">編集</button>
-        <button class="btn-delete" onclick="deleteScreenshot()">削除</button>
+        <button class="btn-cancel" onclick="closeRegister()">キャンセル</button>
+        <button class="btn-submit" id="submitBtn" onclick="submitRegister()">登録</button>
       </div>
     </div>
   </div>
@@ -219,7 +204,7 @@
 <div class="modal-overlay" id="editModal">
   <div class="modal">
     <div class="modal-header">
-      <h2>スクリーンショットを編集</h2>
+      <h2>データを編集</h2>
       <button class="modal-close" onclick="closeEditModal()">&times;</button>
     </div>
     <div class="modal-body">
@@ -249,8 +234,8 @@
         <input type="text" id="editMemo" placeholder="例: エンジェルハイロゥのコンボ参考用">
       </div>
       <div class="form-group">
-        <label>抽出テキスト</label>
-        <textarea id="editExtractedText" class="ocr-textarea" rows="4" placeholder="OCRテキストまたは手入力"></textarea>
+        <label>テキスト内容</label>
+        <textarea id="editExtractedText" class="ocr-textarea" rows="4" placeholder="ルールテキストを入力"></textarea>
       </div>
     </div>
     <div class="modal-footer">
@@ -289,6 +274,6 @@
   </div>
 </div>
 
-<script src="app.js?v=11"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>
