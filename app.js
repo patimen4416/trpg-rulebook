@@ -7,13 +7,13 @@ let currentUser = null;
 let screenshots = [];
 let systems = [];
 let tagMaster = [];
-let categorySchemas = [];  // カテゴリ別フィールド定義
+let categorySchemas = [];
 let activeFilters = new Set();
 let currentTags = [];
 let uploadFiles = [];
 let filteredList = [];
-let currentLbIndex = -1;
-let viewMode = 'grid'; // 'grid' | 'text' | 'list'
+let viewMode = 'text'; // 'text' | 'list'
+let orderDirty = false; // 並べ替え変更があるか
 
 const chapterTagNames = ['キャラ作成', '戦闘', '判定', 'ワールド', 'セッション進行'];
 
@@ -139,6 +139,8 @@ async function showMainApp() {
   await Promise.all([loadSystems(), loadTagMaster(), loadCategorySchemas(), loadScreenshots(), loadOcrUsage()]);
 
   document.getElementById('loadingIndicator').style.display = 'none';
+  // 初期表示モード設定
+  document.querySelectorAll('.view-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === viewMode));
   render();
 }
 
@@ -167,26 +169,13 @@ async function loadScreenshots() {
     screenshots = saved ? JSON.parse(saved) : [];
     return;
   }
-  const { data, error } = await sb.from('rulebook_screenshots').select('*').order('created_at', { ascending: false });
+  const { data, error } = await sb.from('rulebook_screenshots').select('*').order('sort_order', { ascending: true, nullsFirst: false }).order('created_at', { ascending: false });
   if (error) { console.error('loadScreenshots error:', error); return; }
   screenshots = data || [];
 }
 
 function saveLocalScreenshots() {
   if (isLocalMode) localStorage.setItem('rulebook_screenshots', JSON.stringify(screenshots));
-}
-
-// ===== 画像URL =====
-const imageUrlCache = {};
-async function resolveImageUrl(imagePath) {
-  if (!imagePath) return null;
-  if (imageUrlCache[imagePath]) return imageUrlCache[imagePath];
-  const { data, error } = await sb.storage.from(STORAGE_BUCKET).createSignedUrl(imagePath, 3600);
-  if (!error && data?.signedUrl) { imageUrlCache[imagePath] = data.signedUrl; return data.signedUrl; }
-  const { data: pubData } = sb.storage.from(STORAGE_BUCKET).getPublicUrl(imagePath);
-  const url = pubData?.publicUrl || null;
-  imageUrlCache[imagePath] = url;
-  return url;
 }
 
 // ===== ユーティリティ =====
@@ -226,7 +215,6 @@ function getAllTags(category) {
         else if (category === 'content' && !isChapter) m[t] = (m[t] || 0) + 1;
       });
     }
-    // structured_fields のフィールド値でもフィルタ可能
     if (category === 'field' && s.structured_fields) {
       for (const [k, v] of Object.entries(s.structured_fields)) {
         if (v) { const key = `${k}:${v}`; m[key] = (m[key] || 0) + 1; }
@@ -254,7 +242,6 @@ function renderSidebar() {
     }).join('');
   }
 
-  // structured_fieldsフィルタ
   const fieldEl = document.getElementById('fieldTags');
   if (fieldEl) {
     const fieldTags = getAllTags('field');
@@ -283,7 +270,6 @@ function getFiltered() {
   return screenshots.filter(s => {
     for (const f of activeFilters) {
       if (f.includes(':')) {
-        // structured_field フィルタ
         const [k, v] = f.split(':');
         if (!s.structured_fields || s.structured_fields[k] !== v) return false;
       } else {
@@ -308,7 +294,7 @@ function setViewMode(mode) {
 }
 
 // ===== カード描画 =====
-async function renderCards() {
+function renderCards() {
   filteredList = getFiltered();
   document.getElementById('resultCount').textContent = `${filteredList.length} 件`;
 
@@ -325,46 +311,11 @@ async function renderCards() {
   if (viewMode === 'list') {
     grid.className = 'list-view';
     grid.innerHTML = renderListView();
-  } else if (viewMode === 'text') {
+  } else {
     grid.className = 'grid grid-text';
     grid.innerHTML = filteredList.map((s, idx) => renderTextCard(s, idx)).join('');
-  } else {
-    grid.className = 'grid';
-    grid.innerHTML = filteredList.map((s, idx) => renderCardItem(s, idx)).join('');
-    loadCardImages();
+    setupDragAndDrop();
   }
-}
-
-function renderCardItem(s, idx) {
-  const color = getSystemColor(s.system_name);
-  const pageLabel = s.page_number || '';
-  const tags = s.tags || [];
-  const dateStr = s.created_at ? s.created_at.slice(0, 10) : '';
-  const hasLocalImg = s._dataUrl;
-  const imgHtml = hasLocalImg
-    ? `<img src="${s._dataUrl}" alt="">`
-    : `<span class="placeholder-icon" style="color:${color}">読込中</span>`;
-  const catBadge = s.category ? `<span class="category-badge">${s.category}</span>` : '';
-  return `
-  <div class="card" onclick="openLightbox(${idx})">
-    <div class="card-img" data-path="${escAttr(s.image_path || '')}" style="background: linear-gradient(135deg, ${color}15, var(--bg));">
-      ${imgHtml}
-      <span class="system-badge" style="background:${color}">${s.system_name}</span>
-      ${pageLabel ? `<span class="page-label">${pageLabel}</span>` : ''}
-    </div>
-    <div class="card-body">
-      <div class="card-title">${s.title || s.memo || 'スクリーンショット'}</div>
-      ${catBadge}
-      <div class="card-tags">
-        ${tags.slice(0, 3).map(t => `<span class="card-tag">${t}</span>`).join('')}
-        ${tags.length > 3 ? `<span class="card-tag">+${tags.length - 3}</span>` : ''}
-      </div>
-      <div class="card-meta">
-        <span>${s.uploader_name}</span>
-        <span>${dateStr}</span>
-      </div>
-    </div>
-  </div>`;
 }
 
 function renderTextCard(s, idx) {
@@ -372,15 +323,12 @@ function renderTextCard(s, idx) {
   const fields = s.structured_fields || {};
   const extracted = s.extracted_text || '';
 
-  // Parse extracted text into structured display
   const parsed = extracted ? parseEffectText(extracted) : {};
-  // Merge with stored structured_fields (structured_fields takes priority)
   const merged = { ...parsed, ...fields };
 
   const effectName = s.title || s.memo || merged['エフェクト名'] || '(無題)';
   const syndrome = merged['シンドローム'] || '';
 
-  // DX3 effect layout fields
   const layoutFields = [
     ['タイミング', merged['タイミング']],
     ['判定', merged['判定']],
@@ -393,19 +341,15 @@ function renderTextCard(s, idx) {
     ['最大Lv', merged['最大Lv'] || merged['Lv']],
   ].filter(([, v]) => v);
 
-  // Effect description: remove parsed field lines from extracted text
   let description = extracted;
   if (description) {
     const removePatterns = /^(タイミング|判定|技能|難易度|対象|射程|侵蝕値?|制限|最大(?:LV|Lv|レベル)|LV|Lv)[：:\s].*/gim;
     description = description.replace(removePatterns, '').trim();
-    // Remove effect name from first line if it matches
     if (effectName && description.startsWith(effectName)) {
       description = description.slice(effectName.length).trim();
     }
-    // Take only the "効果" description part (after all field lines)
     const effMatch = description.match(/効果[:：\s]*([\s\S]*)/);
     if (effMatch) description = effMatch[1].trim();
-    // Limit display length
     if (description.length > 200) description = description.slice(0, 200) + '…';
   }
 
@@ -417,10 +361,15 @@ function renderTextCard(s, idx) {
 
   const descHtml = description
     ? `<div class="tcard-desc">${description}</div>`
-    : (extracted ? `<div class="tcard-desc tcard-full">${extracted.slice(0, 300)}${extracted.length > 300 ? '…' : ''}</div>` : '<div class="tcard-desc tcard-empty">テキスト未抽出</div>');
+    : (extracted ? `<div class="tcard-desc tcard-full">${extracted.slice(0, 300)}${extracted.length > 300 ? '…' : ''}</div>` : '<div class="tcard-desc tcard-empty">テキスト未入力</div>');
 
   return `
-  <div class="card tcard" onclick="openLightbox(${idx})">
+  <div class="card tcard" data-idx="${idx}" data-id="${s.id}" draggable="true">
+    <div class="tcard-actions">
+      <span class="drag-handle tcard-action-btn" title="ドラッグで並べ替え">⠿</span>
+      <button class="tcard-action-btn" onclick="openEditFromIdx(${idx})" title="編集">✎</button>
+      <button class="tcard-action-btn btn-del" onclick="deleteFromIdx(${idx})" title="削除">✕</button>
+    </div>
     <div class="tcard-header" style="border-left: 4px solid ${color};">
       <div class="tcard-name">${effectName}</div>
       ${syndrome ? `<div class="tcard-syndrome" style="color:${color}">${syndrome}</div>` : ''}
@@ -446,7 +395,7 @@ function renderListView() {
         <th>ページ</th>
         <th>フィールド</th>
         <th>投稿者</th>
-        <th>日付</th>
+        <th>操作</th>
       </tr>
     </thead>
     <tbody>
@@ -454,39 +403,21 @@ function renderListView() {
         const color = getSystemColor(s.system_name);
         const fields = s.structured_fields || {};
         const fieldStr = Object.entries(fields).filter(([,v]) => v).map(([k,v]) => `<span class="field-pill">${k}: ${v}</span>`).join(' ');
-        const dateStr = s.created_at ? s.created_at.slice(0, 10) : '';
-        return `<tr onclick="openLightbox(${idx})" class="list-row">
+        return `<tr class="list-row">
           <td class="list-title">${s.title || s.memo || '(無題)'}</td>
           <td><span class="system-dot" style="background:${color}"></span>${s.system_name}</td>
           <td>${s.category || '-'}</td>
           <td>${s.page_number || '-'}</td>
           <td class="list-fields">${fieldStr || '-'}</td>
           <td>${s.uploader_name}</td>
-          <td>${dateStr}</td>
+          <td class="list-actions">
+            <button class="list-action-btn" onclick="openEditFromIdx(${idx})">編集</button>
+            <button class="list-action-btn btn-del" onclick="deleteFromIdx(${idx})">削除</button>
+          </td>
         </tr>`;
       }).join('')}
     </tbody>
   </table>`;
-}
-
-async function loadCardImages() {
-  const cardImgs = document.querySelectorAll('.card-img[data-path]');
-  for (const el of cardImgs) {
-    const path = el.dataset.path;
-    if (!path) continue;
-    try {
-      const url = await resolveImageUrl(path);
-      if (url) {
-        const img = new Image();
-        img.onload = () => {
-          const badge = el.querySelector('.system-badge')?.outerHTML || '';
-          const page = el.querySelector('.page-label')?.outerHTML || '';
-          el.innerHTML = `<img src="${url}" alt="">${badge}${page}`;
-        };
-        img.src = url;
-      }
-    } catch (e) { /* placeholder stays */ }
-  }
 }
 
 function render() {
@@ -494,11 +425,125 @@ function render() {
   renderCards();
 }
 
-// ===== アップロード =====
+// ===== ドラッグ＆ドロップ並べ替え =====
+let dragSrcIdx = null;
+
+function setupDragAndDrop() {
+  const cards = document.querySelectorAll('.card[draggable="true"]');
+  cards.forEach(card => {
+    card.addEventListener('dragstart', onDragStart);
+    card.addEventListener('dragover', onDragOver);
+    card.addEventListener('dragenter', onDragEnter);
+    card.addEventListener('dragleave', onDragLeave);
+    card.addEventListener('drop', onDrop);
+    card.addEventListener('dragend', onDragEnd);
+
+    // Long-press for mobile
+    let longPressTimer = null;
+    card.addEventListener('touchstart', e => {
+      longPressTimer = setTimeout(() => {
+        card.classList.add('dragging');
+        dragSrcIdx = parseInt(card.dataset.idx);
+      }, 500);
+    }, { passive: true });
+    card.addEventListener('touchend', () => { clearTimeout(longPressTimer); });
+    card.addEventListener('touchmove', () => { clearTimeout(longPressTimer); });
+  });
+}
+
+function onDragStart(e) {
+  dragSrcIdx = parseInt(e.currentTarget.dataset.idx);
+  e.currentTarget.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', dragSrcIdx);
+}
+
+function onDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+}
+
+function onDragEnter(e) {
+  e.preventDefault();
+  e.currentTarget.classList.add('drag-over');
+}
+
+function onDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+
+function onDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  const destIdx = parseInt(e.currentTarget.dataset.idx);
+  if (dragSrcIdx === null || dragSrcIdx === destIdx) return;
+
+  // filteredListのインデックスからscreenshotsのインデックスに変換
+  const srcItem = filteredList[dragSrcIdx];
+  const destItem = filteredList[destIdx];
+  const srcRealIdx = screenshots.indexOf(srcItem);
+  const destRealIdx = screenshots.indexOf(destItem);
+
+  if (srcRealIdx < 0 || destRealIdx < 0) return;
+
+  // 配列内で移動
+  screenshots.splice(srcRealIdx, 1);
+  const newDestIdx = screenshots.indexOf(destItem);
+  screenshots.splice(newDestIdx >= 0 ? newDestIdx : destRealIdx, 0, srcItem);
+
+  // sort_orderを更新
+  screenshots.forEach((s, i) => { s.sort_order = i; });
+
+  orderDirty = true;
+  document.getElementById('btnSaveOrder').style.display = 'inline-block';
+  saveLocalScreenshots();
+  render();
+}
+
+function onDragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.card').forEach(c => c.classList.remove('drag-over'));
+  dragSrcIdx = null;
+}
+
+// ===== 順序保存 =====
+async function saveOrder() {
+  const btn = document.getElementById('btnSaveOrder');
+  btn.textContent = '保存中...';
+
+  if (isLocalMode) {
+    saveLocalScreenshots();
+    btn.textContent = '保存しました';
+    setTimeout(() => { btn.style.display = 'none'; btn.textContent = '順序を保存'; }, 1000);
+    orderDirty = false;
+    return;
+  }
+
+  try {
+    // バッチ更新: 各レコードの sort_order を更新
+    const updates = screenshots.map((s, i) => ({ id: s.id, sort_order: i }));
+    // 10件ずつバッチ処理
+    for (let i = 0; i < updates.length; i += 10) {
+      const batch = updates.slice(i, i + 10);
+      await Promise.all(batch.map(u =>
+        sb.from('rulebook_screenshots').update({ sort_order: u.sort_order }).eq('id', u.id)
+      ));
+    }
+    btn.textContent = '保存しました';
+    orderDirty = false;
+    setTimeout(() => { btn.style.display = 'none'; btn.textContent = '順序を保存'; }, 1500);
+  } catch (e) {
+    console.error('saveOrder error:', e);
+    btn.textContent = '保存失敗';
+    setTimeout(() => { btn.textContent = '順序を保存'; }, 2000);
+  }
+}
+
+// ===== 登録モーダル =====
 let uploadStructuredFields = {};
 
-function openUpload() {
-  document.getElementById('uploadModal').classList.add('visible');
+function openRegister() {
+  document.getElementById('registerModal').classList.add('visible');
   uploadFiles = [];
   currentTags = [];
   uploadStructuredFields = {};
@@ -506,22 +551,22 @@ function openUpload() {
   renderCurrentTags();
   document.getElementById('uploadPage').value = '';
   document.getElementById('uploadMemo').value = '';
+  document.getElementById('uploadExtractedText').value = '';
   document.getElementById('uploadStatus').textContent = '';
   document.getElementById('fileInput').value = '';
   document.getElementById('ocrResult').value = '';
   document.getElementById('ocrStatus').textContent = '';
-  updateSubmitBtn();
+  document.getElementById('btnParse').style.display = 'none';
   renderSystemSelect('uploadSystem');
   onUploadSystemChange();
 }
 
-function closeUpload() {
-  document.getElementById('uploadModal').classList.remove('visible');
+function closeRegister() {
+  document.getElementById('registerModal').classList.remove('visible');
 }
 
 function renderSystemSelect(elId) {
   const sel = document.getElementById(elId);
-  // ダブルクロス3rdを先頭にソート
   const sorted = [...systems].sort((a, b) => a.name === 'ダブルクロス3rd' ? -1 : b.name === 'ダブルクロス3rd' ? 1 : 0);
   sel.innerHTML = sorted.map(s => `<option value="${s.name}">${s.name}</option>`).join('')
     + '<option value="__new">+ 新しいシステムを追加...</option>';
@@ -618,24 +663,27 @@ function renderQuickTags(elId, systemName) {
   el.innerHTML = tags.map(t => `<span class="quick-tag" onclick="addTag('${escAttr(t.name)}')">${t.name}</span>`).join('');
 }
 
-// D&D
+// D&D for file upload (OCR用)
 document.addEventListener('DOMContentLoaded', () => {
   const dz = document.getElementById('dropZone');
-  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
-  dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
-  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('dragover'); handleFiles(e.dataTransfer.files); });
+  if (dz) {
+    dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+    dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+    dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('dragover'); handleFiles(e.dataTransfer.files); });
+  }
 });
 
 function handleFiles(files) {
+  uploadFiles = []; // 1枚だけ保持（OCR用一時ファイル）
   for (const file of files) {
     if (!file.type.startsWith('image/')) continue;
     const reader = new FileReader();
     reader.onload = e => {
-      uploadFiles.push({ file, dataUrl: e.target.result });
+      uploadFiles = [{ file, dataUrl: e.target.result }];
       renderUploadPreview();
-      updateSubmitBtn();
     };
     reader.readAsDataURL(file);
+    break; // 1枚のみ
   }
 }
 
@@ -652,7 +700,6 @@ function renderUploadPreview() {
 function removeFile(i) {
   uploadFiles.splice(i, 1);
   renderUploadPreview();
-  updateSubmitBtn();
 }
 
 // タグ入力
@@ -686,22 +733,17 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-function updateSubmitBtn() {
-  document.getElementById('submitBtn').disabled = uploadFiles.length === 0;
-}
-
 // ===== OCR (Google Cloud Vision API) =====
 let ocrUsage = { used: 0, limit: 1000, resetDate: '' };
 
 async function loadOcrUsage() {
   try {
     const ym = new Date().toISOString().slice(0, 7);
-    const { data, error } = await sb.from('ocr_usage').select('*').eq('year_month', ym).single();
+    const { data } = await sb.from('ocr_usage').select('*').eq('year_month', ym).single();
     if (data) {
       ocrUsage.used = data.used_count;
       ocrUsage.limit = data.free_limit;
     }
-    // リセット日 = 来月1日
     const now = new Date();
     const resetD = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     const diffDays = Math.ceil((resetD - now) / (1000 * 60 * 60 * 24));
@@ -744,14 +786,12 @@ async function runOCR() {
   const statusEl = document.getElementById('ocrStatus');
   const resultEl = document.getElementById('ocrResult');
 
-  // 安全チェック: APIコール前にSupabaseから最新使用量を再取得
   statusEl.textContent = '使用量を確認中...';
   await loadOcrUsage();
-  const safetyMargin = 50; // 安全マージン: 上限の50回手前で停止
+  const safetyMargin = 50;
   const hardLimit = ocrUsage.limit - safetyMargin;
-  const remaining = ocrUsage.limit - ocrUsage.used;
   if (ocrUsage.used >= hardLimit) {
-    alert(`今月のOCR使用量が安全上限に達しました（${ocrUsage.used}/${ocrUsage.limit}回、残り${remaining}回）。\n無料枠超過防止のため${safetyMargin}回の安全マージンを設けています。\nリセットまで${ocrUsage.resetDate}日です。`);
+    alert(`今月のOCR使用量が安全上限に達しました（${ocrUsage.used}/${ocrUsage.limit}回）。`);
     statusEl.textContent = '';
     return;
   }
@@ -759,21 +799,18 @@ async function runOCR() {
   statusEl.textContent = 'Google Cloud Vision APIに送信中...';
 
   try {
-    // 画像をbase64に変換（data:prefix除去）
     const dataUrl = uploadFiles[0].dataUrl;
     const base64 = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
 
-    const requestBody = {
-      requests: [{
-        image: { content: base64 },
-        features: [{ type: 'DOCUMENT_TEXT_DETECTION', maxResults: 1 }],
-        imageContext: { languageHints: ['ja', 'en'] }
-      }]
-    };
-
     const resp = await fetch(
       `https://vision.googleapis.com/v1/images:annotate?key=${VISION_API_KEY}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) }
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        requests: [{
+          image: { content: base64 },
+          features: [{ type: 'DOCUMENT_TEXT_DETECTION', maxResults: 1 }],
+          imageContext: { languageHints: ['ja', 'en'] }
+        }]
+      })}
     );
 
     if (!resp.ok) {
@@ -787,23 +824,23 @@ async function runOCR() {
     if (annotation && annotation.text) {
       const ocrText = annotation.text.trim();
       resultEl.value = ocrText;
+      // テキスト内容フィールドにも反映
+      document.getElementById('uploadExtractedText').value = ocrText;
       document.getElementById('btnParse').style.display = 'inline-block';
 
-      // DX3自動パース＆フィールド入力
       const parsed = parseEffectText(ocrText);
       const filledKeys = Object.keys(parsed).filter(k => k !== 'エフェクト名' && k !== '効果');
       autoFillFields(parsed);
       if (filledKeys.length > 0) {
-        statusEl.textContent = `認識完了（${ocrText.length}文字）— ${filledKeys.length}項目を自動入力: ${filledKeys.join(', ')}`;
+        statusEl.textContent = `認識完了（${ocrText.length}文字）— ${filledKeys.length}項目を自動入力`;
       } else {
-        statusEl.textContent = `認識完了（${ocrText.length}文字） - 内容を確認・修正してください`;
+        statusEl.textContent = `認識完了（${ocrText.length}文字）`;
       }
     } else {
       resultEl.value = '';
       statusEl.textContent = 'テキストが検出されませんでした';
     }
 
-    // 使用量カウントアップ
     await incrementOcrUsage();
   } catch (e) {
     console.error('Vision API error:', e);
@@ -826,7 +863,6 @@ function openClipper() {
     clipState.img = img;
     const canvas = document.getElementById('clipperCanvas');
     const wrap = document.getElementById('clipperCanvasWrap');
-    // Fit canvas to modal width while keeping aspect ratio
     const maxW = wrap.clientWidth || 860;
     const scale = Math.min(1, maxW / img.width);
     canvas.width = img.width * scale;
@@ -844,7 +880,6 @@ function closeClipper() {
 }
 
 function setupClipperEvents(canvas) {
-  // Remove old listeners by replacing element
   const newCanvas = canvas.cloneNode(true);
   canvas.parentNode.replaceChild(newCanvas, canvas);
   const ctx = newCanvas.getContext('2d');
@@ -861,15 +896,12 @@ function setupClipperEvents(canvas) {
     const rect = newCanvas.getBoundingClientRect();
     clipState.endX = e.clientX - rect.left;
     clipState.endY = e.clientY - rect.top;
-    // Redraw image and selection rectangle
     ctx.drawImage(clipState.img, 0, 0, newCanvas.width, newCanvas.height);
-    // Draw existing results as green rects
     clipState.results.forEach(r => {
       ctx.strokeStyle = '#2ed573'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
       ctx.strokeRect(r.x * clipState.scale, r.y * clipState.scale, r.w * clipState.scale, r.h * clipState.scale);
       ctx.setLineDash([]);
     });
-    // Draw current selection
     const sx = clipState.startX, sy = clipState.startY;
     const w = clipState.endX - sx, h = clipState.endY - sy;
     ctx.strokeStyle = '#e94560'; ctx.lineWidth = 2; ctx.setLineDash([6, 3]);
@@ -922,7 +954,7 @@ function setupClipperEvents(canvas) {
     ctx.setLineDash([]);
   }, { passive: false });
 
-  newCanvas.addEventListener('touchend', e => {
+  newCanvas.addEventListener('touchend', () => {
     clipState.dragging = false;
     const w = Math.abs(clipState.endX - clipState.startX);
     const h = Math.abs(clipState.endY - clipState.startY);
@@ -934,7 +966,6 @@ function resetClipSelection() {
   const canvas = document.getElementById('clipperCanvas');
   const ctx = canvas.getContext('2d');
   ctx.drawImage(clipState.img, 0, 0, canvas.width, canvas.height);
-  // Redraw existing result rects
   clipState.results.forEach(r => {
     ctx.strokeStyle = '#2ed573'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
     ctx.strokeRect(r.x * clipState.scale, r.y * clipState.scale, r.w * clipState.scale, r.h * clipState.scale);
@@ -950,14 +981,12 @@ async function runClipOCR() {
   const statusEl = document.getElementById('clipOcrStatus');
   statusEl.textContent = '使用量を確認中...';
   await loadOcrUsage();
-  const safetyMargin = 50;
-  if (ocrUsage.used >= ocrUsage.limit - safetyMargin) {
-    alert(`今月のOCR使用量が安全上限に達しました。`);
+  if (ocrUsage.used >= ocrUsage.limit - 50) {
+    alert('今月のOCR使用量が安全上限に達しました。');
     statusEl.textContent = '';
     return;
   }
 
-  // Crop the selected area from the original image
   const scale = clipState.scale;
   const sx = Math.min(clipState.startX, clipState.endX) / scale;
   const sy = Math.min(clipState.startY, clipState.endY) / scale;
@@ -976,17 +1005,13 @@ async function runClipOCR() {
   try {
     const resp = await fetch(
       `https://vision.googleapis.com/v1/images:annotate?key=${VISION_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requests: [{
-            image: { content: base64 },
-            features: [{ type: 'DOCUMENT_TEXT_DETECTION', maxResults: 1 }],
-            imageContext: { languageHints: ['ja', 'en'] }
-          }]
-        })
-      }
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        requests: [{
+          image: { content: base64 },
+          features: [{ type: 'DOCUMENT_TEXT_DETECTION', maxResults: 1 }],
+          imageContext: { languageHints: ['ja', 'en'] }
+        }]
+      })}
     );
     if (!resp.ok) throw new Error(`API Error ${resp.status}`);
     const result = await resp.json();
@@ -998,13 +1023,9 @@ async function runClipOCR() {
       return;
     }
 
-    // Save result with crop coordinates and cropped image
-    const croppedDataUrl = cropCanvas.toDataURL('image/png');
-    clipState.results.push({ x: sx, y: sy, w: sw, h: sh, text, parsed: parseEffectText(text), croppedDataUrl });
+    clipState.results.push({ x: sx, y: sy, w: sw, h: sh, text, parsed: parseEffectText(text) });
     renderClipResults();
     statusEl.textContent = `認識完了（${text.length}文字）`;
-
-    // Redraw canvas with all result rects
     resetClipSelection();
   } catch (e) {
     console.error('Clip OCR error:', e);
@@ -1016,15 +1037,9 @@ function parseEffectText(text) {
   const parsed = {};
   if (!text) return parsed;
 
-  // Normalize: full-width colon → half-width, trim each line
   const normalized = text.replace(/\r/g, '').replace(/：/g, ':');
   const lines = normalized.split('\n').map(l => l.trim()).filter(l => l);
   const allText = lines.join(' ');
-
-  // DX3 field patterns — handles "技能:－ 難易度:自動成功" on same line
-  // Each pattern extracts value until next known field label or end of context
-  const fieldLabels = '(?:タイミング|判定|技能|難易度|対象|射程|侵蝕値|侵食値|制限|効果|最大レベル|最大Lv)';
-  const valUntilNext = new RegExp(`(?=${fieldLabels}:|$)`, 'g');
 
   const patterns = [
     { key: 'タイミング', re: /タイミング\s*[:]\s*(.+?)(?=\s+(?:判定|技能|難易度|対象|射程|侵蝕値|侵食値|制限|効果)|$)/m },
@@ -1038,29 +1053,24 @@ function parseEffectText(text) {
     { key: '最大レベル', re: /最大(?:レベル|Lv|LV)\s*[:]\s*(\d+)/m },
   ];
 
-  // Try matching against each line individually and against allText
   for (const p of patterns) {
-    // First try line-by-line (more accurate for multi-field lines)
     let found = false;
     for (const line of lines) {
       const m = line.match(p.re);
       if (m) { parsed[p.key] = m[1].trim().replace(/\s+$/, ''); found = true; break; }
     }
-    // Fallback to full text
     if (!found) {
       const m = allText.match(p.re);
       if (m) parsed[p.key] = m[1].trim().replace(/\s+$/, '');
     }
   }
 
-  // Clean up values: remove trailing field labels that leaked in
   for (const key of Object.keys(parsed)) {
     parsed[key] = parsed[key]
       .replace(/\s*(タイミング|判定|技能|難易度|対象|射程|侵蝕値|侵食値|制限|効果|最大レベル).*$/, '')
       .replace(/[\s　]+$/, '');
   }
 
-  // タイミング: normalize common OCR variations
   if (parsed['タイミング']) {
     const t = parsed['タイミング'];
     if (/マイナー/.test(t)) parsed['タイミング'] = 'マイナー';
@@ -1073,16 +1083,13 @@ function parseEffectText(text) {
     else if (/常時/.test(t)) parsed['タイミング'] = '常時';
   }
 
-  // 効果テキスト
   const effMatch = allText.match(/効果\s*[:]\s*([\s\S]*)/);
   if (effMatch) parsed['効果'] = effMatch[1].trim();
 
-  // Detect effect name: first non-field line, often has ruby text (ふりがな) above
   for (const line of lines) {
     const clean = line.replace(/[\s　]/g, '');
     if (clean.length === 0) continue;
     if (/^(タイミング|判定|技能|難易度|対象|射程|侵蝕値|侵食値|制限|効果|最大レベル|最大Lv)/i.test(clean)) continue;
-    // Skip very short lines (likely ruby/furigana)
     if (clean.length <= 3 && /^[\u3040-\u309F]+$/.test(clean)) continue;
     if (clean.length < 50) {
       parsed['エフェクト名'] = line.trim();
@@ -1090,7 +1097,6 @@ function parseEffectText(text) {
     }
   }
 
-  // Detect シンドローム from known names
   const syndromes = ['エンジェルハイロゥ','ブラムストーカー','ブラックドッグ','サラマンドラ','ミストルティン','モルフェウス','ハヌマーン','ウロボロス','エグザイル','ノイマン','ソラリス','バロール','オルクス','キメラ'];
   for (const syn of syndromes) {
     const re = new RegExp('(?:^|[\\s/／・、,\\(（])' + syn + '(?:$|[\\s/／・、,\\)）])', 'm');
@@ -1102,7 +1108,6 @@ function parseEffectText(text) {
   return parsed;
 }
 
-// DX3カテゴリ自動判別
 function detectDX3Category(parsed) {
   if (parsed['タイミング'] || parsed['侵蝕値'] || parsed['最大レベル']) return 'エフェクト';
   if (/Dロイス|ディーロイス/.test(JSON.stringify(parsed))) return 'Dロイス';
@@ -1138,55 +1143,29 @@ function removeClipResult(i) {
 function applyClipResults() {
   if (clipState.results.length === 0) { closeClipper(); return; }
 
-  // Merge all clip texts into OCR result
   const allText = clipState.results.map((r, i) =>
     clipState.results.length > 1 ? `--- 範囲${i + 1} ---\n${r.text}` : r.text
   ).join('\n\n');
   document.getElementById('ocrResult').value = allText;
+  document.getElementById('uploadExtractedText').value = allText;
 
-  // Replace upload files with cropped images
-  uploadFiles = clipState.results.map((r, i) => {
-    // Convert dataUrl to File object
-    const blob = dataUrlToBlob(r.croppedDataUrl);
-    const fileName = `clip_${i + 1}_${Date.now()}.png`;
-    const file = new File([blob], fileName, { type: 'image/png' });
-    return { file, dataUrl: r.croppedDataUrl };
-  });
-  renderUploadPreview();
-  updateSubmitBtn();
-
-  // If exactly one result, try auto-filling structured fields
   if (clipState.results.length === 1) {
     autoFillFields(clipState.results[0].parsed);
   }
 
-  // Show parse button
   document.getElementById('btnParse').style.display = 'inline-block';
-
   closeClipper();
 }
 
-function dataUrlToBlob(dataUrl) {
-  const parts = dataUrl.split(',');
-  const mime = parts[0].match(/:(.*?);/)[1];
-  const binary = atob(parts[1]);
-  const arr = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
-  return new Blob([arr], { type: mime });
-}
-
 function autoFillFields(parsed) {
-  // Auto-detect system and category for DX3
   const sysEl = document.getElementById('uploadSystem');
   const catEl = document.getElementById('uploadCategory');
   const detectedCat = detectDX3Category(parsed);
 
   if (detectedCat && sysEl.value === 'ダブルクロス3rd') {
-    // Set category and render fields
     catEl.value = detectedCat;
     onUploadCategoryChange();
   } else if (detectedCat && !sysEl.value) {
-    // Auto-select DX3 if fields look like DX3
     sysEl.value = 'ダブルクロス3rd';
     sysEl.dispatchEvent(new Event('change'));
     catEl.value = detectedCat;
@@ -1209,25 +1188,21 @@ function autoFillFields(parsed) {
     '記載本': '記載本',
   };
 
-  let filledCount = 0;
   for (const [parseKey, fieldName] of Object.entries(fieldMap)) {
     if (!parsed[parseKey]) continue;
     const el = container.querySelector(`[data-field="${fieldName}"]`);
     if (!el) continue;
     if (el.tagName === 'SELECT') {
       const options = [...el.options];
-      // Exact match first, then partial
       const exact = options.find(o => o.value === parsed[parseKey]);
       const partial = options.find(o => o.value && parsed[parseKey].includes(o.value));
-      if (exact) { el.value = exact.value; filledCount++; }
-      else if (partial) { el.value = partial.value; filledCount++; }
+      if (exact) el.value = exact.value;
+      else if (partial) el.value = partial.value;
     } else {
       el.value = parsed[parseKey];
-      filledCount++;
     }
   }
 
-  // Also set effect name as memo if available
   if (parsed['エフェクト名']) {
     const memoEl = document.getElementById('uploadMemo');
     if (memoEl && !memoEl.value) memoEl.value = parsed['エフェクト名'];
@@ -1240,186 +1215,88 @@ function parseOcrToFields() {
   const parsed = parseEffectText(text);
   autoFillFields(parsed);
   if (Object.keys(parsed).length > 0) {
-    const summary = Object.entries(parsed).map(([k, v]) => `${k}: ${v}`).join('\n');
     document.getElementById('ocrStatus').textContent = `${Object.keys(parsed).length}件のフィールドを検出・入力しました`;
   } else {
     document.getElementById('ocrStatus').textContent = '自動認識可能なフィールドが見つかりませんでした';
   }
 }
 
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = src;
-    s.onload = resolve;
-    s.onerror = reject;
-    document.head.appendChild(s);
-  });
-}
-
-// ===== アップロード送信 =====
-async function submitUpload() {
-  if (uploadFiles.length === 0) return;
-
+// ===== 登録送信（画像保存なし） =====
+async function submitRegister() {
   const btn = document.getElementById('submitBtn');
   const status = document.getElementById('uploadStatus');
   btn.disabled = true;
-  status.textContent = 'アップロード中...';
+  status.textContent = '登録中...';
 
   const systemName = document.getElementById('uploadSystem').value;
   const category = document.getElementById('uploadCategory').value || null;
   const page = document.getElementById('uploadPage').value.trim();
   const memo = document.getElementById('uploadMemo').value.trim();
-  const extractedText = document.getElementById('ocrResult').value.trim() || null;
+  const extractedText = document.getElementById('uploadExtractedText').value.trim() || null;
   const structuredFields = collectStructuredFields('uploadFields');
+  const title = memo || '(無題)';
+  const pageLabel = page ? `P${page}` : null;
 
-  let successCount = 0;
+  // 新しいsort_orderは現在の最大値+1
+  const maxOrder = screenshots.reduce((max, s) => Math.max(max, s.sort_order || 0), -1);
 
-  for (let i = 0; i < uploadFiles.length; i++) {
-    const f = uploadFiles[i];
-    status.textContent = `アップロード中... (${i + 1}/${uploadFiles.length})`;
-
-    try {
-      const pageLabel = page
-        ? (uploadFiles.length > 1 ? `P${page}-${i + 1}` : `P${page}`)
-        : null;
-      const title = memo || f.file.name.replace(/\.\w+$/, '');
-
-      if (isLocalMode) {
-        screenshots.unshift({
-          id: 'local_' + Date.now() + '_' + i,
-          title, system_name: systemName, category, page_number: pageLabel,
-          tags: [...currentTags], structured_fields: { ...structuredFields },
-          extracted_text: extractedText, memo,
-          image_path: null, _dataUrl: f.dataUrl,
-          uploader_name: getDisplayName(),
-          created_at: new Date().toISOString(),
-        });
-        successCount++;
-        continue;
-      }
-
-      // Storage upload
-      const ext = f.file.name.split('.').pop() || 'jpg';
-      const safeFolder = encodeURIComponent(systemName).replace(/%/g, '_');
-      const filePath = `${safeFolder}/${Date.now()}_${i}.${ext}`;
-      const { error: storageError } = await sb.storage.from(STORAGE_BUCKET).upload(filePath, f.file, { contentType: f.file.type });
-      if (storageError) { status.textContent = 'Storage エラー: ' + storageError.message; continue; }
-
-      // DB insert
-      const { error: dbError } = await sb.from('rulebook_screenshots').insert({
-        title, system_name: systemName, category, page_number: pageLabel,
-        tags: currentTags, structured_fields: structuredFields,
-        extracted_text: extractedText, memo,
-        image_path: filePath, uploader_name: getDisplayName(),
-      });
-      if (dbError) { status.textContent = 'DB エラー: ' + dbError.message; continue; }
-
-      successCount++;
-    } catch (e) { console.error('Upload error:', e); }
+  if (isLocalMode) {
+    screenshots.push({
+      id: 'local_' + Date.now(),
+      title, system_name: systemName, category, page_number: pageLabel,
+      tags: [...currentTags], structured_fields: { ...structuredFields },
+      extracted_text: extractedText, memo,
+      image_path: null,
+      uploader_name: getDisplayName(),
+      sort_order: maxOrder + 1,
+      created_at: new Date().toISOString(),
+    });
+    saveLocalScreenshots();
+  } else {
+    const { error } = await sb.from('rulebook_screenshots').insert({
+      title, system_name: systemName, category, page_number: pageLabel,
+      tags: currentTags, structured_fields: structuredFields,
+      extracted_text: extractedText, memo,
+      image_path: 'none', // カラム NOT NULL 対応
+      uploader_name: getDisplayName(),
+      sort_order: maxOrder + 1,
+    });
+    if (error) { status.textContent = 'エラー: ' + error.message; btn.disabled = false; return; }
+    await loadScreenshots();
   }
 
-  if (successCount === 0) { status.textContent = 'アップロード失敗'; btn.disabled = false; return; }
-  status.textContent = `${successCount}枚をアップロードしました`;
-
-  saveLocalScreenshots();
-  if (!isLocalMode) await loadScreenshots();
-
-  setTimeout(() => { closeUpload(); render(); }, 800);
+  status.textContent = '登録しました';
+  setTimeout(() => { closeRegister(); btn.disabled = false; render(); }, 600);
 }
 
-// ===== ライトボックス =====
-async function openLightbox(idx) {
-  currentLbIndex = idx;
-  await showLightboxItem();
-  document.getElementById('lightbox').classList.add('visible');
-}
-
-function closeLightbox() {
-  document.getElementById('lightbox').classList.remove('visible');
-}
-
-function navLightbox(dir) {
-  currentLbIndex += dir;
-  if (currentLbIndex < 0) currentLbIndex = filteredList.length - 1;
-  if (currentLbIndex >= filteredList.length) currentLbIndex = 0;
-  showLightboxItem();
-}
-
-async function showLightboxItem() {
-  const s = filteredList[currentLbIndex];
+// ===== カードから直接編集・削除 =====
+function openEditFromIdx(idx) {
+  const s = filteredList[idx];
   if (!s) return;
-
-  const wrap = document.getElementById('lbImgWrap');
-  const color = getSystemColor(s.system_name);
-
-  if (s._dataUrl) {
-    wrap.innerHTML = `<img src="${s._dataUrl}" alt="">`;
-  } else if (s.image_path) {
-    const url = await resolveImageUrl(s.image_path);
-    wrap.innerHTML = url
-      ? `<img src="${url}" alt="">`
-      : `<div class="lb-placeholder" style="color:${color}">${getSystemShort(s.system_name)}</div>`;
-  } else {
-    wrap.innerHTML = `<div class="lb-placeholder" style="color:${color}">${getSystemShort(s.system_name)}</div>`;
-  }
-
-  const pageStr = s.page_number ? `（${s.page_number}）` : '';
-  document.getElementById('lbTitle').textContent = `${s.title || 'スクリーンショット'}${pageStr}`;
-  document.getElementById('lbTags').innerHTML = [s.system_name, s.category, ...(s.tags || [])].filter(Boolean).map(t =>
-    `<span class="card-tag" style="font-size:12px; padding:4px 10px;">${t}</span>`
-  ).join('');
-
-  // structured fields
-  const fieldsEl = document.getElementById('lbFields');
-  const fields = s.structured_fields || {};
-  const fieldEntries = Object.entries(fields).filter(([, v]) => v);
-  if (fieldEntries.length > 0) {
-    fieldsEl.innerHTML = '<div class="lb-fields-grid">' + fieldEntries.map(([k, v]) =>
-      `<div class="lb-field"><span class="lb-field-label">${k}</span><span class="lb-field-value">${v}</span></div>`
-    ).join('') + '</div>';
-    fieldsEl.style.display = 'block';
-  } else {
-    fieldsEl.style.display = 'none';
-  }
-
-  // extracted text
-  const textEl = document.getElementById('lbExtractedText');
-  if (s.extracted_text) {
-    textEl.innerHTML = `<div class="lb-extracted"><span class="lb-extracted-label">抽出テキスト</span><pre>${s.extracted_text}</pre></div>`;
-    textEl.style.display = 'block';
-  } else {
-    textEl.style.display = 'none';
-  }
-
-  const dateStr = s.created_at ? s.created_at.slice(0, 10) : '';
-  document.getElementById('lbMeta').textContent = `${s.uploader_name} が ${dateStr} にアップロード`;
+  openEditModal(s);
 }
 
-async function deleteScreenshot() {
-  const s = filteredList[currentLbIndex];
+async function deleteFromIdx(idx) {
+  const s = filteredList[idx];
   if (!s) return;
-  if (!confirm('この画像を削除しますか？')) return;
+  if (!confirm(`「${s.title || '(無題)'}」を削除しますか？`)) return;
 
   if (isLocalMode) {
     screenshots = screenshots.filter(x => x.id !== s.id);
     saveLocalScreenshots();
   } else {
-    if (s.image_path) await sb.storage.from(STORAGE_BUCKET).remove([s.image_path]);
     await sb.from('rulebook_screenshots').delete().eq('id', s.id);
     await loadScreenshots();
   }
-  closeLightbox();
   render();
 }
 
 // ===== 編集モーダル =====
 let editTags = [];
+let editTarget = null;
 
-function openEditModal() {
-  const s = filteredList[currentLbIndex];
-  if (!s) return;
-  closeLightbox();
+function openEditModal(s) {
+  editTarget = s;
   document.getElementById('editModal').classList.add('visible');
 
   renderSystemSelect('editSystem');
@@ -1452,6 +1329,7 @@ function onEditCategoryChange(existingFields) {
 
 function closeEditModal() {
   document.getElementById('editModal').classList.remove('visible');
+  editTarget = null;
 }
 
 function addEditTag(name) {
@@ -1485,8 +1363,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function submitEdit() {
-  const s = filteredList[currentLbIndex];
-  if (!s) return;
+  if (!editTarget) return;
 
   const status = document.getElementById('editStatus');
   status.textContent = '保存中...';
@@ -1499,7 +1376,7 @@ async function submitEdit() {
   const structuredFields = collectStructuredFields('editFields');
 
   if (isLocalMode) {
-    const idx = screenshots.findIndex(x => x.id === s.id);
+    const idx = screenshots.findIndex(x => x.id === editTarget.id);
     if (idx >= 0) {
       Object.assign(screenshots[idx], {
         system_name: systemName, category, page_number: page,
@@ -1513,7 +1390,7 @@ async function submitEdit() {
       system_name: systemName, category, page_number: page,
       tags: editTags, title: memo, memo,
       extracted_text: extractedText, structured_fields: structuredFields,
-    }).eq('id', s.id);
+    }).eq('id', editTarget.id);
     if (error) { status.textContent = 'エラー: ' + error.message; return; }
     await loadScreenshots();
   }
@@ -1541,11 +1418,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ===== キーボード =====
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeLightbox(); closeUpload(); closeEditModal(); }
-  if (document.getElementById('lightbox').classList.contains('visible')) {
-    if (e.key === 'ArrowLeft') navLightbox(-1);
-    if (e.key === 'ArrowRight') navLightbox(1);
-  }
+  if (e.key === 'Escape') { closeRegister(); closeEditModal(); closeClipper(); }
 });
 
 // ===== 初期化 =====
