@@ -283,7 +283,8 @@ function getFiltered() {
       }
     }
     if (q) {
-      const hay = [s.title, s.system_name, s.category, s.page_number, s.extracted_text, s.memo, ...(s.tags || [])].join(' ').toLowerCase();
+      const plainExtracted = (s.extracted_text || '').replace(/<[^>]*>/g, '');
+      const hay = [s.title, s.system_name, s.category, s.page_number, plainExtracted, s.memo, ...(s.tags || [])].join(' ').toLowerCase();
       const fieldVals = s.structured_fields ? Object.values(s.structured_fields).join(' ').toLowerCase() : '';
       if (!(hay + ' ' + fieldVals).includes(q)) return false;
     }
@@ -334,8 +335,9 @@ function renderTextCard(s, idx) {
   const color = getSystemColor(s.system_name);
   const fields = s.structured_fields || {};
   const extracted = s.extracted_text || '';
-
-  const parsed = extracted ? parseEffectText(extracted) : {};
+  // HTMLタグを除去したプレーンテキストでフィールドパース
+  const plainText = extracted.replace(/<[^>]*>/g, '');
+  const parsed = plainText ? parseEffectText(plainText) : {};
   const merged = { ...parsed, ...fields };
 
   const effectName = s.title || s.memo || merged['エフェクト名'] || '(無題)';
@@ -353,16 +355,19 @@ function renderTextCard(s, idx) {
     ['最大Lv', merged['最大Lv'] || merged['Lv']],
   ].filter(([, v]) => v);
 
+  // 表示用テキスト（HTMLを維持しつつフィールド行を除去）
   let description = extracted;
   if (description) {
-    const removePatterns = /^(タイミング|判定|技能|難易度|対象|射程|侵蝕値?|制限|最大(?:LV|Lv|レベル)|LV|Lv)[：:\s].*/gim;
-    description = description.replace(removePatterns, '').trim();
-    if (effectName && description.startsWith(effectName)) {
-      description = description.slice(effectName.length).trim();
+    // フィールド行除去はプレーンテキスト化して判定し、元HTMLはそのまま表示
+    const plainDesc = description.replace(/<[^>]*>/g, '');
+    const hasFields = layoutFields.length > 0;
+    if (hasFields) {
+      // フィールドが抽出できた場合はdescriptionとしてHTMLをそのまま表示
     }
-    const effMatch = description.match(/効果[:：\s]*([\s\S]*)/);
-    if (effMatch) description = effMatch[1].trim();
-    if (description.length > 200) description = description.slice(0, 200) + '…';
+    // テキストが長すぎる場合はプレーンテキストで切る
+    if (plainDesc.length > 300) {
+      description = plainDesc.slice(0, 300) + '…';
+    }
   }
 
   const fieldsHtml = layoutFields.length > 0
@@ -559,7 +564,7 @@ function openRegister() {
   renderCurrentTags();
   document.getElementById('uploadPage').value = '';
   document.getElementById('uploadMemo').value = '';
-  document.getElementById('uploadExtractedText').value = '';
+  document.getElementById('uploadExtractedText').innerHTML = '';
   document.getElementById('uploadStatus').textContent = '';
   document.getElementById('fileInput').value = '';
   document.getElementById('ocrResult').value = '';
@@ -833,7 +838,7 @@ async function runOCR() {
       const ocrText = annotation.text.trim();
       resultEl.value = ocrText;
       // テキスト内容フィールドにも反映
-      document.getElementById('uploadExtractedText').value = ocrText;
+      document.getElementById('uploadExtractedText').innerText = ocrText;
       document.getElementById('btnParse').style.display = 'inline-block';
 
       const parsed = parseEffectText(ocrText);
@@ -1155,7 +1160,7 @@ function applyClipResults() {
     clipState.results.length > 1 ? `--- 範囲${i + 1} ---\n${r.text}` : r.text
   ).join('\n\n');
   document.getElementById('ocrResult').value = allText;
-  document.getElementById('uploadExtractedText').value = allText;
+  document.getElementById('uploadExtractedText').innerText = allText;
 
   if (clipState.results.length === 1) {
     autoFillFields(clipState.results[0].parsed);
@@ -1240,7 +1245,7 @@ async function submitRegister() {
   const category = document.getElementById('uploadCategory').value || null;
   const page = document.getElementById('uploadPage').value.trim();
   const memo = document.getElementById('uploadMemo').value.trim();
-  const extractedText = document.getElementById('uploadExtractedText').value.trim() || null;
+  const extractedText = document.getElementById('uploadExtractedText').innerHTML.trim() || null;
   const structuredFields = collectStructuredFields('uploadFields');
   const title = memo || '(無題)';
   const pageLabel = page ? `P${page}` : null;
@@ -1318,7 +1323,7 @@ function openEditModal(s) {
   renderEditTags();
   renderQuickTags('editQuickTags', s.system_name);
   document.getElementById('editMemo').value = s.title || s.memo || '';
-  document.getElementById('editExtractedText').value = s.extracted_text || '';
+  document.getElementById('editExtractedText').innerHTML = s.extracted_text || '';
   document.getElementById('editStatus').textContent = '';
 }
 
@@ -1380,7 +1385,7 @@ async function submitEdit() {
   const category = document.getElementById('editCategory').value || null;
   const page = document.getElementById('editPage').value.trim() || null;
   const memo = document.getElementById('editMemo').value.trim();
-  const extractedText = document.getElementById('editExtractedText').value.trim() || null;
+  const extractedText = document.getElementById('editExtractedText').innerHTML.trim() || null;
   const structuredFields = collectStructuredFields('editFields');
 
   if (isLocalMode) {
@@ -1428,6 +1433,33 @@ document.addEventListener('DOMContentLoaded', () => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { closeRegister(); closeEditModal(); closeClipper(); }
 });
+
+// ===== リッチテキストエディタ =====
+function rteExec(cmd) {
+  document.execCommand(cmd, false, null);
+}
+
+function rteColor(colorInputId, editorId) {
+  const color = document.getElementById(colorInputId).value;
+  const editor = document.getElementById(editorId);
+  // エディタにフォーカスが必要
+  editor.focus();
+  document.execCommand('foreColor', false, color);
+}
+
+function rteReset(editorId) {
+  const editor = document.getElementById(editorId);
+  const sel = window.getSelection();
+  if (sel.rangeCount > 0 && editor.contains(sel.anchorNode)) {
+    // 選択範囲がある場合はその範囲だけリセット
+    document.execCommand('removeFormat', false, null);
+  } else {
+    // 選択なしの場合は全体をプレーンテキストに
+    const text = editor.innerText;
+    editor.innerHTML = '';
+    editor.innerText = text;
+  }
+}
 
 // ===== 初期化 =====
 checkSession();
