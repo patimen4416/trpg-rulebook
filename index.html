@@ -6,7 +6,7 @@
 <title>ルルブアーカイブ - TRPG ルールブック共有</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=2"></script>
-<link rel="stylesheet" href="style.css?v=15">
+<link rel="stylesheet" href="style.css?v=16">
 </head>
 <body>
 
@@ -184,10 +184,19 @@
         <input type="text" id="uploadMemo" placeholder="例: エンジェルハイロゥのコンボ参考用">
       </div>
 
-      <!-- 抽出テキスト（手入力可） -->
+      <!-- 抽出テキスト（リッチテキスト） -->
       <div class="form-group">
         <label>テキスト内容（手入力 or OCR結果）</label>
-        <textarea id="uploadExtractedText" class="ocr-textarea" rows="4" placeholder="ルールテキストを直接入力、またはOCRで自動入力"></textarea>
+        <div class="rte-toolbar">
+          <button type="button" class="rte-btn" onclick="rteExec('bold')" title="太字"><b>B</b></button>
+          <button type="button" class="rte-btn rte-btn-italic" onclick="rteExec('italic')" title="斜体"><i>I</i></button>
+          <span class="rte-sep"></span>
+          <input type="color" class="rte-color" id="uploadTextColor" value="#ff6b6b" title="文字色">
+          <button type="button" class="rte-btn" onclick="rteColor('uploadTextColor','uploadExtractedText')" title="選択範囲に色を適用">A</button>
+          <span class="rte-sep"></span>
+          <button type="button" class="rte-btn rte-btn-reset" onclick="rteReset('uploadExtractedText')" title="書式リセット">リセット</button>
+        </div>
+        <div id="uploadExtractedText" class="rte-editor" contenteditable="true" data-placeholder="ルールテキストを直接入力、またはOCRで自動入力"></div>
       </div>
     </div>
     <div class="modal-footer">
@@ -235,7 +244,16 @@
       </div>
       <div class="form-group">
         <label>テキスト内容</label>
-        <textarea id="editExtractedText" class="ocr-textarea" rows="4" placeholder="ルールテキストを入力"></textarea>
+        <div class="rte-toolbar">
+          <button type="button" class="rte-btn" onclick="rteExec('bold')" title="太字"><b>B</b></button>
+          <button type="button" class="rte-btn rte-btn-italic" onclick="rteExec('italic')" title="斜体"><i>I</i></button>
+          <span class="rte-sep"></span>
+          <input type="color" class="rte-color" id="editTextColor" value="#ff6b6b" title="文字色">
+          <button type="button" class="rte-btn" onclick="rteColor('editTextColor','editExtractedText')" title="選択範囲に色を適用">A</button>
+          <span class="rte-sep"></span>
+          <button type="button" class="rte-btn rte-btn-reset" onclick="rteReset('editExtractedText')" title="書式リセット">リセット</button>
+        </div>
+        <div id="editExtractedText" class="rte-editor" contenteditable="true" data-placeholder="ルールテキストを入力"></div>
       </div>
     </div>
     <div class="modal-footer">
@@ -274,6 +292,6 @@
   </div>
 </div>
 
-<script src="app.js?v=15"></script>
+<script src="app.js?v=16"></script>
 </body>
 </html>
