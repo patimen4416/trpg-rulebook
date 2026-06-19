@@ -318,7 +318,14 @@ function renderCards() {
     grid.innerHTML = renderListView();
   } else {
     grid.className = 'grid grid-text';
-    grid.innerHTML = filteredList.map((s, idx) => renderTextCard(s, idx)).join('');
+    // カード間にドロップスロットを配置
+    let html = '<div class="drop-slot" data-slot="0"></div>';
+    filteredList.forEach((s, idx) => {
+      html += renderTextCard(s, idx);
+      html += `<div class="drop-slot" data-slot="${idx + 1}"></div>`;
+    });
+    html += '<div class="drop-slot-end" data-slot="end">↓ 最後尾に移動</div>';
+    grid.innerHTML = html;
     setupDragAndDrop();
   }
 }
@@ -370,6 +377,7 @@ function renderTextCard(s, idx) {
 
   return `
   <div class="card tcard" data-idx="${idx}" data-id="${s.id}" draggable="true">
+    <span class="order-num">${idx + 1}</span>
     <div class="tcard-actions">
       <span class="drag-handle tcard-action-btn" title="ドラッグで並べ替え">⠿</span>
       <button class="tcard-action-btn" onclick="openEditFromIdx(${idx})" title="編集">✎</button>
@@ -434,88 +442,76 @@ function render() {
 let dragSrcIdx = null;
 
 function setupDragAndDrop() {
-  const cards = document.querySelectorAll('.card[draggable="true"]');
-  cards.forEach(card => {
-    card.addEventListener('dragstart', onDragStart);
-    card.addEventListener('dragover', onDragOver);
-    card.addEventListener('dragenter', onDragEnter);
-    card.addEventListener('dragleave', onDragLeave);
-    card.addEventListener('drop', onDrop);
-    card.addEventListener('dragend', onDragEnd);
+  // カードにdragstart/dragendを設定
+  document.querySelectorAll('.card[draggable="true"]').forEach(card => {
+    card.addEventListener('dragstart', e => {
+      dragSrcIdx = parseInt(card.dataset.idx);
+      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', dragSrcIdx);
+    });
+    card.addEventListener('dragend', e => {
+      card.classList.remove('dragging');
+      clearAllSlotHighlights();
+      dragSrcIdx = null;
+    });
+  });
 
-    // Long-press for mobile
-    let longPressTimer = null;
-    card.addEventListener('touchstart', e => {
-      longPressTimer = setTimeout(() => {
-        card.classList.add('dragging');
-        dragSrcIdx = parseInt(card.dataset.idx);
-      }, 500);
-    }, { passive: true });
-    card.addEventListener('touchend', () => { clearTimeout(longPressTimer); });
-    card.addEventListener('touchmove', () => { clearTimeout(longPressTimer); });
+  // ドロップスロット（カード間 + 最後尾）にドロップイベントを設定
+  document.querySelectorAll('.drop-slot, .drop-slot-end').forEach(slot => {
+    slot.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      clearAllSlotHighlights();
+      slot.classList.add('drag-over');
+    });
+    slot.addEventListener('dragleave', e => {
+      if (!slot.contains(e.relatedTarget)) slot.classList.remove('drag-over');
+    });
+    slot.addEventListener('drop', e => {
+      e.preventDefault();
+      slot.classList.remove('drag-over');
+      if (dragSrcIdx === null) return;
+
+      const slotVal = slot.dataset.slot;
+      let insertBeforeIdx = slotVal === 'end' ? filteredList.length : parseInt(slotVal);
+
+      // 自分自身の前後なら何もしない
+      if (insertBeforeIdx === dragSrcIdx || insertBeforeIdx === dragSrcIdx + 1) return;
+
+      const srcItem = filteredList[dragSrcIdx];
+      const srcRealIdx = screenshots.indexOf(srcItem);
+      if (srcRealIdx < 0) return;
+
+      // まず元の位置から削除
+      screenshots.splice(srcRealIdx, 1);
+
+      // 挿入位置を計算（filteredListベース → screenshotsベースに変換）
+      let insertRealIdx;
+      if (insertBeforeIdx >= filteredList.length || slotVal === 'end') {
+        // 最後尾
+        insertRealIdx = screenshots.length;
+      } else {
+        // insertBeforeIdxが元のdragSrcIdxより後ろなら、削除分で1つずれる
+        const adjustedIdx = insertBeforeIdx > dragSrcIdx ? insertBeforeIdx - 1 : insertBeforeIdx;
+        const targetItem = filteredList.filter(item => item !== srcItem)[adjustedIdx];
+        insertRealIdx = targetItem ? screenshots.indexOf(targetItem) : screenshots.length;
+        if (insertRealIdx < 0) insertRealIdx = screenshots.length;
+      }
+
+      screenshots.splice(insertRealIdx, 0, srcItem);
+      screenshots.forEach((s, i) => { s.sort_order = i; });
+
+      orderDirty = true;
+      document.getElementById('btnSaveOrder').style.display = 'inline-block';
+      saveLocalScreenshots();
+      render();
+    });
   });
 }
 
-function onDragStart(e) {
-  dragSrcIdx = parseInt(e.currentTarget.dataset.idx);
-  e.currentTarget.classList.add('dragging');
-  e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', dragSrcIdx);
-}
-
-function onDragOver(e) {
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'move';
-  // Show insertion indicator on the hovered card
-  const card = e.currentTarget;
-  document.querySelectorAll('.card.drag-over').forEach(c => { if (c !== card) c.classList.remove('drag-over'); });
-  card.classList.add('drag-over');
-}
-
-function onDragEnter(e) {
-  e.preventDefault();
-}
-
-function onDragLeave(e) {
-  // Only remove if actually leaving the card (not entering a child)
-  const related = e.relatedTarget;
-  if (!e.currentTarget.contains(related)) {
-    e.currentTarget.classList.remove('drag-over');
-  }
-}
-
-function onDrop(e) {
-  e.preventDefault();
-  e.currentTarget.classList.remove('drag-over');
-  const destIdx = parseInt(e.currentTarget.dataset.idx);
-  if (dragSrcIdx === null || dragSrcIdx === destIdx) return;
-
-  // filteredListのインデックスからscreenshotsのインデックスに変換
-  const srcItem = filteredList[dragSrcIdx];
-  const destItem = filteredList[destIdx];
-  const srcRealIdx = screenshots.indexOf(srcItem);
-  const destRealIdx = screenshots.indexOf(destItem);
-
-  if (srcRealIdx < 0 || destRealIdx < 0) return;
-
-  // 配列内で移動
-  screenshots.splice(srcRealIdx, 1);
-  const newDestIdx = screenshots.indexOf(destItem);
-  screenshots.splice(newDestIdx >= 0 ? newDestIdx : destRealIdx, 0, srcItem);
-
-  // sort_orderを更新
-  screenshots.forEach((s, i) => { s.sort_order = i; });
-
-  orderDirty = true;
-  document.getElementById('btnSaveOrder').style.display = 'inline-block';
-  saveLocalScreenshots();
-  render();
-}
-
-function onDragEnd(e) {
-  e.currentTarget.classList.remove('dragging');
-  document.querySelectorAll('.card').forEach(c => c.classList.remove('drag-over'));
-  dragSrcIdx = null;
+function clearAllSlotHighlights() {
+  document.querySelectorAll('.drop-slot.drag-over, .drop-slot-end.drag-over').forEach(s => s.classList.remove('drag-over'));
 }
 
 // ===== 順序保存 =====
